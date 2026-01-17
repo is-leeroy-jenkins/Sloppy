@@ -1,6 +1,6 @@
 
 
-# 🕵️‍♂️ Sloppy — Interactive Network Packet Analyzer
+
 
 
 
