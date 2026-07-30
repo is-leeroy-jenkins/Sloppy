@@ -1,6 +1,8 @@
 pydantic
 typing
-numpy==1.26.4
-pandas
 matplotlib
 seaborn
+streamlit
+scapy
+streamlit-extras
+plotly
