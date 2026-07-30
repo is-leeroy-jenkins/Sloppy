@@ -40,7 +40,51 @@
     config.py
   </summary>
   ******************************************************************************************
-  '''
+'''
+# ----- Constants ------
+BLUE_DIVIDER = "<div style='height:2px;align:left;background:#0078FC;margin:30px 0px 30px 0px;'></div>"
 ICON = r'resources/images/favicon.ico'
 LOGO = r'resources/images/Sloppy.png'
 DB = r'stores/sqlite/sloppy.db'
+
+# ------ Color ------
+ACCENT_BLUE = '#0078FC'
+LIGHT_BLUE = '#38A3FF'
+CYAN = '#00C2FF'
+PURPLE = '#9B7BFF'
+GREEN = '#2DD4BF'
+AMBER = '#F5B942'
+RED = '#FF5C6C'
+
+# ------ Page ------
+PAGE_BACKGROUND = '#111111'
+PANEL_BACKGROUND = '#171717'
+GRID_COLOR = 'rgba( 148, 163, 184, 0.15 )'
+BORDER_COLOR = 'rgba( 148, 163, 184, 0.32 )'
+TEXT_COLOR = '#F8FAFC'
+MUTED_TEXT_COLOR = '#94A3B8'
+
+# ----- Protocol ------
+PROTOCOL_ORDER = [ 'TCP', 'UDP', 'ICMP', ]
+PROTOCOL_COLORS = { 'TCP': ACCENT_BLUE, 'UDP': GREEN, 'ICMP': AMBER, }
+
+# ----- Chart & Visualization -----
+SUMMARY_CHART_HEIGHT = 390
+FLOW_CHART_HEIGHT = 510
+PACKET_EDITOR_HEIGHT = 460
+PACKET_EDITOR_ROW_LIMIT = 250
+TRAFFIC_WINDOW_SECONDS = 60
+CHART_CONFIG = { 'displaylogo': False, 'responsive': True, 'scrollZoom': False,
+	'modeBarButtonsToRemove': [ 'lasso2d', 'select2d', ], }
+
+TCP_FLAG_ORDER = [ 'SYN', 'ACK', 'PSH', 'FIN', 'RST', 'URG', ]
+
+FLOW_COLUMNS = [ 'src_ip', 'src_port', 'dst_ip', 'dst_port', 'protocol', ]
+
+TOP_FLAG_PORT_LIMIT = 10
+TOP_MATRIX_SOURCE_LIMIT = 15
+TOP_MATRIX_DESTINATION_LIMIT = 15
+TOP_PORT_TREND_LIMIT = 5
+TOP_ENDPOINT_CONNECTIVITY_LIMIT = 10
+FLOW_SCATTER_LIMIT = 250
+THROUGHPUT_ROLLING_SECONDS = 5
