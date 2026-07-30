@@ -50,7 +50,6 @@ from __future__ import annotations
 import queue
 import random
 import threading
-import time
 from datetime import datetime
 from typing import Dict, List
 
@@ -96,7 +95,15 @@ BORDER_COLOR = 'rgba( 148, 163, 184, 0.32 )'
 TEXT_COLOR = '#F8FAFC'
 MUTED_TEXT_COLOR = '#94A3B8'
 
+PROTOCOL_ORDER = [ 'TCP', 'UDP', 'ICMP', ]
+
 PROTOCOL_COLORS = { 'TCP': ACCENT_BLUE, 'UDP': GREEN, 'ICMP': AMBER, }
+
+SUMMARY_CHART_HEIGHT = 390
+FLOW_CHART_HEIGHT = 510
+PACKET_EDITOR_HEIGHT = 460
+PACKET_EDITOR_ROW_LIMIT = 250
+TRAFFIC_WINDOW_SECONDS = 60
 
 CHART_CONFIG = { 'displaylogo': False, 'responsive': True, 'scrollZoom': False,
 	'modeBarButtonsToRemove': [ 'lasso2d', 'select2d', ], }
@@ -155,15 +162,6 @@ st.markdown( f"""
 			font-size: 0.85rem;
 			color: {MUTED_TEXT_COLOR};
 			margin: 0 0 0.75rem 0;
-		}}
-
-		.sloppy-status {{
-			background-color: {PANEL_BACKGROUND};
-			border: 1px solid {BORDER_COLOR};
-			border-left: 4px solid {ACCENT_BLUE};
-			border-radius: 8px;
-			padding: 0.75rem 1rem;
-			margin: 0.25rem 0 0.75rem 0;
 		}}
 	</style>
 	""", unsafe_allow_html=True, )
@@ -227,11 +225,24 @@ if 'capture_error' not in st.session_state:
 if 'captured_packet_count' not in st.session_state:
 	st.session_state.captured_packet_count = 0
 
+if 'packet_version' not in st.session_state:
+	st.session_state.packet_version = 0
+
 # ==========================================================================================
-# PART 4 — Packet Normalization and Demo Generation
+# PART 4 — Dynamic Fragment Intervals
 # ==========================================================================================
 
-def normalize_packet( record: Dict, session_id: str ) -> Dict:
+REALTIME_REFRESH_INTERVAL = (1.0 if st.session_state.running else None)
+
+ANALYSIS_REFRESH_INTERVAL = (2.0 if st.session_state.running else None)
+
+FLOW_REFRESH_INTERVAL = (5.0 if st.session_state.running else None)
+
+# ==========================================================================================
+# PART 5 — Packet Normalization and Demo Generation
+# ==========================================================================================
+
+def normalize_packet( record: Dict, session_id: str, ) -> Dict:
 	"""
 	Normalize a packet record.
 
@@ -249,13 +260,13 @@ def normalize_packet( record: Dict, session_id: str ) -> Dict:
 	throw_if( 'record', record )
 	throw_if( 'session_id', session_id )
 	
-	return { 'timestamp': record.get( 'timestamp', datetime.utcnow( ) ),
+	return { 'timestamp': record.get( 'timestamp', datetime.utcnow( ), ),
 		'src_ip': record.get( 'src_ip' ), 'dst_ip': record.get( 'dst_ip' ),
 		'protocol': record.get( 'protocol' ), 'src_port': record.get( 'src_port' ),
 		'dst_port': record.get( 'dst_port' ), 'flags': record.get( 'flags', '' ),
 		'length': record.get( 'length', 0 ), 'session': session_id, }
 
-def generate_demo_packet( session_id: str ) -> Dict:
+def generate_demo_packet( session_id: str, ) -> Dict:
 	"""
 	Generate a demonstration packet.
 
@@ -271,27 +282,27 @@ def generate_demo_packet( session_id: str ) -> Dict:
 	"""
 	throw_if( 'session_id', session_id )
 	
-	protocol = random.choice( [ 'TCP', 'UDP', 'ICMP' ] )
+	protocol = random.choice( PROTOCOL_ORDER )
 	
 	record = { 'timestamp': datetime.utcnow( ), 'src_ip': f'192.168.1.{random.randint( 1, 50 )}',
 		'dst_ip': f'10.0.0.{random.randint( 1, 50 )}', 'protocol': protocol,
 		'length': random.randint( 64, 1514 ), 'src_port': None, 'dst_port': None, 'flags': '', }
 	
 	if protocol == 'TCP':
-		record.update( { 'src_port': random.randint( 1024, 65535 ),
-			'dst_port': random.choice( [ 22, 80, 443, 3389, 8080 ] ),
-			'flags': random.choice( [ 'SYN', 'ACK', 'PSH', 'FIN', 'RST' ] ), } )
+		record.update( { 'src_port': random.randint( 1024, 65535, ),
+			'dst_port': random.choice( [ 22, 80, 443, 3389, 8080, ] ),
+			'flags': random.choice( [ 'SYN', 'ACK', 'PSH', 'FIN', 'RST', ] ), } )
 	elif protocol == 'UDP':
-		record.update( { 'src_port': random.randint( 1024, 65535 ),
-			'dst_port': random.choice( [ 53, 67, 68, 123, 161, 5353 ] ), } )
+		record.update( { 'src_port': random.randint( 1024, 65535, ),
+			'dst_port': random.choice( [ 53, 67, 68, 123, 161, 5353, ] ), } )
 	else:
 		record[ 'flags' ] = random.choice(
 			[ 'ECHO_REQUEST', 'ECHO_REPLY', 'DEST_UNREACH', 'TTL_EXCEEDED', ] )
 	
-	return normalize_packet( record, session_id )
+	return normalize_packet( record, session_id, )
 
 # ==========================================================================================
-# PART 5 — Live Packet Capture
+# PART 6 — Live Packet Capture
 # ==========================================================================================
 
 def write_capture_error( capture_error_queue: queue.Queue, exception: Exception, ) -> None:
@@ -309,8 +320,9 @@ def write_capture_error( capture_error_queue: queue.Queue, exception: Exception,
 	Returns:
 	    None: This function writes the error message into the supplied queue.
 	"""
-	throw_if( 'capture_error_queue', capture_error_queue )
-	throw_if( 'exception', exception )
+	throw_if( 'capture_error_queue', capture_error_queue, )
+	
+	throw_if( 'exception', exception, )
 	
 	try:
 		capture_error_queue.put_nowait( str( exception ) )
@@ -335,9 +347,11 @@ def scapy_callback( packet: object, packet_queue: queue.Queue,
 	    None: This function writes supported packet records into the packet queue.
 	"""
 	try:
-		throw_if( 'packet', packet )
-		throw_if( 'packet_queue', packet_queue )
-		throw_if( 'capture_error_queue', capture_error_queue )
+		throw_if( 'packet', packet, )
+		
+		throw_if( 'packet_queue', packet_queue, )
+		
+		throw_if( 'capture_error_queue', capture_error_queue, )
 		
 		if not packet.haslayer( ScapyEther ):
 			return
@@ -345,7 +359,7 @@ def scapy_callback( packet: object, packet_queue: queue.Queue,
 		raw = bytes( packet )
 		ethernet = Ethernet( raw )
 		
-		if ethernet.proto not in (8, 0x0800, 2048):
+		if ethernet.proto not in (8, 0x0800, 2048,):
 			return
 		
 		ipv4 = IPv4( ethernet.data )
@@ -381,7 +395,7 @@ def scapy_callback( packet: object, packet_queue: queue.Queue,
 	except queue.Full:
 		return
 	except Exception as e:
-		write_capture_error( capture_error_queue, e )
+		write_capture_error( capture_error_queue, e, )
 
 def start_live_capture( packet_queue: queue.Queue, capture_error_queue: queue.Queue,
 	stop_event: threading.Event, ) -> None:
@@ -401,15 +415,18 @@ def start_live_capture( packet_queue: queue.Queue, capture_error_queue: queue.Qu
 	    None: This function runs until capture is stopped or fails.
 	"""
 	try:
-		throw_if( 'packet_queue', packet_queue )
-		throw_if( 'capture_error_queue', capture_error_queue )
-		throw_if( 'stop_event', stop_event )
+		throw_if( 'packet_queue', packet_queue, )
+		
+		throw_if( 'capture_error_queue', capture_error_queue, )
+		
+		throw_if( 'stop_event', stop_event, )
 		
 		while not stop_event.is_set( ):
 			sniff( prn=lambda packet: scapy_callback( packet, packet_queue, capture_error_queue, ),
 				store=False, timeout=1, )
 	except Exception as e:
-		write_capture_error( capture_error_queue, e )
+		write_capture_error( capture_error_queue, e, )
+		
 		stop_event.set( )
 
 def start_capture_thread( ) -> None:
@@ -425,10 +442,10 @@ def start_capture_thread( ) -> None:
 	"""
 	live_thread = st.session_state.live_thread
 	
-	if live_thread is not None and live_thread.is_alive( ):
+	if (live_thread is not None and live_thread.is_alive( )):
 		if st.session_state.live_stop_event.is_set( ):
-			st.session_state.capture_error = (
-				'The previous capture thread is still stopping. Select Start again momentarily.')
+			st.session_state.capture_error = ('The previous capture thread is still stopping. '
+			                                  'Select Start again momentarily.')
 		
 		return
 	
@@ -453,7 +470,7 @@ def stop_capture_thread( ) -> None:
 	"""
 	st.session_state.live_stop_event.set( )
 
-def drain_packet_queue( session_id: str ) -> int:
+def drain_packet_queue( session_id: str, ) -> int:
 	"""
 	Drain captured packets from the live queue.
 
@@ -467,15 +484,18 @@ def drain_packet_queue( session_id: str ) -> int:
 	Returns:
 	    int: Number of packet records transferred from the queue.
 	"""
-	throw_if( 'session_id', session_id )
+	throw_if( 'session_id', session_id, )
 	
 	packet_count = 0
 	
 	while True:
 		try:
 			record = st.session_state.live_queue.get_nowait( )
-			normalized = normalize_packet( record, session_id )
+			
+			normalized = normalize_packet( record, session_id, )
+			
 			st.session_state.packets.append( normalized )
+			
 			packet_count += 1
 		except queue.Empty:
 			break
@@ -497,14 +517,105 @@ def drain_capture_errors( ) -> str:
 	
 	while True:
 		try:
-			capture_error = st.session_state.capture_error_queue.get_nowait( )
+			capture_error = (st.session_state.capture_error_queue.get_nowait( ))
 		except queue.Empty:
 			break
 	
 	return capture_error
 
 # ==========================================================================================
-# PART 6 — Visualization Helpers
+# PART 7 — Packet Ingestion and Snapshot Assembly
+# ==========================================================================================
+
+def ingest_packets( window_size: int, ) -> int:
+	"""
+	Ingest available packet records.
+
+	Purpose:
+	    Generates demonstration packets or drains the live capture queue, retains the
+	    configured rolling window, and increments the packet snapshot version when data
+	    changes.
+
+	Args:
+	    window_size (int): Maximum number of packet records retained in session state.
+
+	Returns:
+	    int: Number of packet records added during the current ingestion cycle.
+	"""
+	throw_if( 'window_size', window_size, )
+	
+	if not st.session_state.running:
+		return 0
+	
+	packet_count = 0
+	
+	if st.session_state.capture_mode == 'Demo / Replay':
+		packet_count = random.randint( 5, 15, )
+		
+		for _ in range( packet_count ):
+			packet = generate_demo_packet( st.session_state.session_id )
+			
+			st.session_state.packets.append( packet )
+	
+	elif (st.session_state.capture_mode == 'Live (Scapy)' and SCAPY_AVAILABLE):
+		packet_count = drain_packet_queue( st.session_state.session_id )
+		
+		st.session_state.captured_packet_count += (packet_count)
+	
+	capture_error = drain_capture_errors( )
+	
+	if capture_error:
+		st.session_state.capture_error = capture_error
+		st.session_state.running = False
+		stop_capture_thread( )
+	
+	st.session_state.packets = (st.session_state.packets[ -window_size: ])
+	
+	if packet_count > 0:
+		st.session_state.packet_version += 1
+	
+	return packet_count
+
+def create_packet_snapshot( packets: List[ Dict ], proto_filter: List[ str ],
+	port_range: tuple[ int, int ], ) -> pd.DataFrame:
+	"""
+	Create a filtered packet snapshot.
+
+	Purpose:
+	    Converts retained packet records into a typed DataFrame and applies the active
+	    protocol and destination-port filters without modifying session-state records.
+
+	Args:
+	    packets (List[Dict]): Retained normalized packet records.
+	    proto_filter (List[str]): Protocol values included in the snapshot.
+	    port_range (tuple[int, int]): Inclusive destination-port range.
+
+	Returns:
+	    pd.DataFrame: Filtered packet snapshot.
+	"""
+	throw_if( 'packets', packets, )
+	
+	throw_if( 'proto_filter', proto_filter, )
+	
+	throw_if( 'port_range', port_range, )
+	
+	df_packets = pd.DataFrame( packets )
+	
+	if df_packets.empty:
+		return df_packets
+	
+	df_packets[ 'timestamp' ] = pd.to_datetime( df_packets[ 'timestamp' ], errors='coerce', )
+	
+	df_packets = df_packets[ df_packets[ 'protocol' ].isin( proto_filter ) ]
+	
+	df_packets = df_packets[ df_packets[ 'dst_port' ].isna( ) | (
+			(df_packets[ 'dst_port' ] >= port_range[ 0 ]) & (
+			df_packets[ 'dst_port' ] <= port_range[ 1 ])) ]
+	
+	return df_packets.copy( )
+
+# ==========================================================================================
+# PART 8 — Visualization Helpers
 # ==========================================================================================
 
 def configure_figure( figure: go.Figure, height: int, show_legend: bool = True, ) -> go.Figure:
@@ -523,8 +634,9 @@ def configure_figure( figure: go.Figure, height: int, show_legend: bool = True, 
 	Returns:
 	    go.Figure: Configured Plotly figure.
 	"""
-	throw_if( 'figure', figure )
-	throw_if( 'height', height )
+	throw_if( 'figure', figure, )
+	
+	throw_if( 'height', height, )
 	
 	figure.update_layout( height=height, margin={ 'l': 18, 'r': 18, 't': 52, 'b': 24, },
 		paper_bgcolor=PANEL_BACKGROUND, plot_bgcolor=PANEL_BACKGROUND,
@@ -533,7 +645,8 @@ def configure_figure( figure: go.Figure, height: int, show_legend: bool = True, 
 		hoverlabel={ 'bgcolor': '#252525', 'bordercolor': BORDER_COLOR,
 			'font': { 'color': TEXT_COLOR, }, },
 		legend={ 'orientation': 'h', 'yanchor': 'bottom', 'y': 1.02, 'xanchor': 'right', 'x': 1,
-			'bgcolor': 'rgba( 0, 0, 0, 0 )', }, showlegend=show_legend, )
+			'bgcolor': 'rgba( 0, 0, 0, 0 )', }, showlegend=show_legend,
+		transition={ 'duration': 0, }, )
 	
 	figure.update_xaxes( showgrid=True, gridcolor=GRID_COLOR, zeroline=False,
 		linecolor=BORDER_COLOR, tickfont={ 'color': MUTED_TEXT_COLOR, },
@@ -545,13 +658,13 @@ def configure_figure( figure: go.Figure, height: int, show_legend: bool = True, 
 	
 	return figure
 
-def create_protocol_figure( df_packets: pd.DataFrame ) -> go.Figure:
+def create_protocol_figure( df_packets: pd.DataFrame, ) -> go.Figure:
 	"""
 	Create the protocol-composition figure.
 
 	Purpose:
 	    Displays packet counts and percentage share for each protocol in a compact donut
-	    visualization.
+	    visualization with deterministic protocol ordering.
 
 	Args:
 	    df_packets (pd.DataFrame): Filtered packet records.
@@ -559,35 +672,42 @@ def create_protocol_figure( df_packets: pd.DataFrame ) -> go.Figure:
 	Returns:
 	    go.Figure: Protocol-composition donut chart.
 	"""
-	throw_if( 'df_packets', df_packets )
+	throw_if( 'df_packets', df_packets, )
 	
-	df_protocols = (df_packets.groupby( 'protocol', dropna=False ).size( ).rename(
-		'packets' ).reset_index( ).sort_values( 'packets', ascending=False ))
+	df_protocols = (
+		df_packets.groupby( 'protocol', dropna=False, ).size( ).rename( 'packets' ).reset_index( ))
+	
+	df_protocols[ 'protocol' ] = pd.Categorical( df_protocols[ 'protocol' ],
+		categories=PROTOCOL_ORDER, ordered=True, )
+	
+	df_protocols = (df_protocols.sort_values( 'protocol' ).dropna( subset=[ 'protocol' ] ))
 	
 	figure = go.Figure( data=[
 		go.Pie( labels=df_protocols[ 'protocol' ], values=df_protocols[ 'packets' ], hole=0.62,
-			sort=False, textinfo='label+percent', textposition='outside', marker={
-				'colors': [ PROTOCOL_COLORS.get( protocol, PURPLE ) for protocol in
-					df_protocols[ 'protocol' ] ],
-				'line': { 'color': PANEL_BACKGROUND, 'width': 3, }, },
+			sort=False, direction='clockwise', textinfo='label+percent', textposition='outside',
+			marker={ 'colors': [ PROTOCOL_COLORS.get( str( protocol ), PURPLE, ) for protocol in
+				df_protocols[ 'protocol' ] ], 'line': { 'color': PANEL_BACKGROUND, 'width': 3,
+			}, },
 			hovertemplate=('<b>%{label}</b><br>'
 			               'Packets: %{value:,}<br>'
 			               'Share: %{percent}'
 			               '<extra></extra>'), ) ] )
 	
-	figure.add_annotation( text=f'<b>{len( df_packets ):,}</b><br><span>Packets</span>', x=0.5,
-		y=0.5, showarrow=False, font={ 'color': TEXT_COLOR, 'size': 16, }, )
+	figure.add_annotation( text=(f'<b>{len( df_packets ):,}</b>'
+	                             '<br><span>Packets</span>'), x=0.5, y=0.5, showarrow=False,
+		font={ 'color': TEXT_COLOR, 'size': 16, }, )
 	
 	figure.update_layout( title='Protocol Composition', )
 	
-	return configure_figure( figure, height=390, show_legend=False, )
+	return configure_figure( figure, SUMMARY_CHART_HEIGHT, False, )
 
-def create_traffic_figure( df_packets: pd.DataFrame ) -> go.Figure:
+def create_traffic_figure( df_packets: pd.DataFrame, ) -> go.Figure:
 	"""
 	Create the traffic-over-time figure.
 
 	Purpose:
-	    Displays packets per second by protocol using an interactive stacked area chart.
+	    Displays packets per second by protocol across a fixed rolling time window using an
+	    interactive stacked area chart.
 
 	Args:
 	    df_packets (pd.DataFrame): Filtered packet records.
@@ -595,18 +715,20 @@ def create_traffic_figure( df_packets: pd.DataFrame ) -> go.Figure:
 	Returns:
 	    go.Figure: Protocol-level packet traffic over time.
 	"""
-	throw_if( 'df_packets', df_packets )
+	throw_if( 'df_packets', df_packets, )
 	
 	df_time = df_packets.copy( )
+	
 	df_time[ 'timestamp' ] = pd.to_datetime( df_time[ 'timestamp' ], errors='coerce', )
 	
-	df_time = df_time.dropna( subset=[ 'timestamp', 'protocol' ] )
+	df_time = df_time.dropna( subset=[ 'timestamp', 'protocol', ] )
 	
 	if df_time.empty:
-		return configure_figure( go.Figure( ), height=390, show_legend=False, )
+		return configure_figure( go.Figure( ), SUMMARY_CHART_HEIGHT, False, )
 	
 	current_time = df_time[ 'timestamp' ].max( )
-	start_time = current_time - pd.Timedelta( seconds=60 )
+	
+	start_time = (current_time - pd.Timedelta( seconds=TRAFFIC_WINDOW_SECONDS ))
 	
 	df_time = df_time[ df_time[ 'timestamp' ] >= start_time ]
 	
@@ -615,8 +737,7 @@ def create_traffic_figure( df_packets: pd.DataFrame ) -> go.Figure:
 			'packets' ).reset_index( ))
 	
 	figure = px.area( df_time, x='timestamp', y='packets', color='protocol',
-		color_discrete_map=PROTOCOL_COLORS,
-		category_orders={ 'protocol': [ 'TCP', 'UDP', 'ICMP' ], }, )
+		color_discrete_map=PROTOCOL_COLORS, category_orders={ 'protocol': PROTOCOL_ORDER, }, )
 	
 	figure.update_traces( line={ 'width': 2, }, hovertemplate=('<b>%{fullData.name}</b><br>'
 	                                                           'Time: %{x|%H:%M:%S}<br>'
@@ -624,17 +745,19 @@ def create_traffic_figure( df_packets: pd.DataFrame ) -> go.Figure:
 	                                                           '<extra></extra>'), )
 	
 	figure.update_layout( title='Traffic Over Time', xaxis_title='Time — Last 60 Seconds',
-		yaxis_title='Packets / Second', hovermode='x unified', )
+		yaxis_title='Packets / Second', hovermode='x unified', uirevision='traffic-over-time', )
 	
-	return configure_figure( figure, height=390, show_legend=True, )
+	figure.update_xaxes( range=[ start_time, current_time, ], )
+	
+	return configure_figure( figure, SUMMARY_CHART_HEIGHT, True, )
 
 def create_endpoint_figure( df_packets: pd.DataFrame, column_name: str, title: str, ) -> go.Figure:
 	"""
 	Create a ranked endpoint figure.
 
 	Purpose:
-	    Displays the most active source or destination IP addresses as a ranked horizontal
-	    bar chart.
+	    Displays the most active source or destination IP addresses as a deterministic
+	    ranked horizontal bar chart.
 
 	Args:
 	    df_packets (pd.DataFrame): Filtered packet records.
@@ -644,36 +767,47 @@ def create_endpoint_figure( df_packets: pd.DataFrame, column_name: str, title: s
 	Returns:
 	    go.Figure: Ranked endpoint activity chart.
 	"""
-	throw_if( 'df_packets', df_packets )
-	throw_if( 'column_name', column_name )
-	throw_if( 'title', title )
+	throw_if( 'df_packets', df_packets, )
+	
+	throw_if( 'column_name', column_name, )
+	
+	throw_if( 'title', title, )
 	
 	df_endpoints = (
 		df_packets.dropna( subset=[ column_name ] ).groupby( column_name ).size( ).rename(
-			'packets' ).reset_index( ).nlargest( 10, 'packets' ).sort_values( 'packets',
-			ascending=True ))
+			'packets' ).reset_index( ).nlargest( 10, 'packets', ).sort_values(
+			[ 'packets', column_name, ], ascending=[ True, True, ], ))
+	
+	maximum_packets = max( int( df_endpoints[ 'packets' ].max( ) ), 1, )
+	
+	category_order = (df_endpoints[ column_name ].astype( str ).tolist( ))
 	
 	figure = go.Figure( data=[
 		go.Bar( x=df_endpoints[ 'packets' ], y=df_endpoints[ column_name ], orientation='h',
 			marker={ 'color': df_endpoints[ 'packets' ],
-				'colorscale': [ [ 0.0, '#153E75' ], [ 0.5, ACCENT_BLUE ], [ 1.0, CYAN ], ],
-				'line': { 'color': 'rgba( 255, 255, 255, 0.12 )', 'width': 1, }, },
+				'colorscale': [ [ 0.0, '#153E75', ], [ 0.5, ACCENT_BLUE, ], [ 1.0, CYAN, ], ],
+				'line': { 'color': ('rgba( 255, 255, 255, 0.12 )'), 'width': 1, }, },
 			text=df_endpoints[ 'packets' ], textposition='outside', cliponaxis=False,
 			hovertemplate=('<b>%{y}</b><br>'
 			               'Packets: %{x:,}'
 			               '<extra></extra>'), ) ] )
 	
-	figure.update_layout( title=title, xaxis_title='Packet Count', yaxis_title='', )
+	figure.update_layout( title=title, xaxis_title='Packet Count', yaxis_title='',
+		uirevision=title, )
 	
-	return configure_figure( figure, height=390, show_legend=False, )
+	figure.update_xaxes( range=[ 0, maximum_packets * 1.18, ], )
+	
+	figure.update_yaxes( categoryorder='array', categoryarray=category_order, )
+	
+	return configure_figure( figure, SUMMARY_CHART_HEIGHT, False, )
 
-def create_port_heatmap( df_packets: pd.DataFrame ) -> go.Figure:
+def create_port_heatmap( df_packets: pd.DataFrame, ) -> go.Figure:
 	"""
 	Create the destination-port heatmap.
 
 	Purpose:
 	    Displays packet concentration across the most active destination ports and
-	    transport protocols.
+	    transport protocols using stable protocol and port ordering.
 
 	Args:
 	    df_packets (pd.DataFrame): Filtered packet records.
@@ -681,33 +815,36 @@ def create_port_heatmap( df_packets: pd.DataFrame ) -> go.Figure:
 	Returns:
 	    go.Figure: Destination-port activity heatmap.
 	"""
-	throw_if( 'df_packets', df_packets )
+	throw_if( 'df_packets', df_packets, )
 	
-	df_ports = df_packets.dropna( subset=[ 'dst_port', 'protocol' ], ).copy( )
+	df_ports = df_packets.dropna( subset=[ 'dst_port', 'protocol', ], ).copy( )
 	
 	if df_ports.empty:
-		return configure_figure( go.Figure( ), height=390, show_legend=False, )
+		return configure_figure( go.Figure( ), SUMMARY_CHART_HEIGHT, False, )
 	
-	df_ports[ 'dst_port' ] = df_ports[ 'dst_port' ].astype( int )
+	df_ports[ 'dst_port' ] = (df_ports[ 'dst_port' ].astype( int ))
 	
 	top_ports = (df_ports.groupby( 'dst_port' ).size( ).nlargest( 15 ).index)
 	
 	df_ports = df_ports[ df_ports[ 'dst_port' ].isin( top_ports ) ]
 	
-	df_heatmap = (df_ports.groupby( [ 'protocol', 'dst_port' ] ).size( ).rename(
+	df_heatmap = (df_ports.groupby( [ 'protocol', 'dst_port', ] ).size( ).rename(
 		'packets' ).reset_index( ).pivot( index='protocol', columns='dst_port',
 		values='packets', ).fillna( 0 ))
 	
-	df_heatmap = df_heatmap.reindex( index=[ protocol for protocol in [ 'TCP', 'UDP', 'ICMP' ] if
-		protocol in df_heatmap.index ] )
+	protocol_rows = [ protocol for protocol in PROTOCOL_ORDER if protocol in df_heatmap.index ]
+	
+	df_heatmap = df_heatmap.reindex( index=protocol_rows )
 	
 	df_heatmap = df_heatmap[ sorted( df_heatmap.columns ) ]
 	
+	maximum_packets = max( float( df_heatmap.to_numpy( ).max( ) ), 1.0, )
+	
 	figure = go.Figure( data=[
 		go.Heatmap( z=df_heatmap.values, x=[ str( port ) for port in df_heatmap.columns ],
-			y=df_heatmap.index,
-			colorscale=[ [ 0.0, '#101820' ], [ 0.25, '#153E75' ], [ 0.55, ACCENT_BLUE ],
-				[ 0.8, CYAN ], [ 1.0, '#D9F8FF' ], ],
+			y=df_heatmap.index, zmin=0, zmax=maximum_packets,
+			colorscale=[ [ 0.0, '#101820', ], [ 0.25, '#153E75', ], [ 0.55, ACCENT_BLUE, ],
+				[ 0.8, CYAN, ], [ 1.0, '#D9F8FF', ], ],
 			colorbar={ 'title': 'Packets', 'thickness': 12, 'outlinewidth': 0, },
 			hovertemplate=('<b>%{y}</b><br>'
 			               'Destination Port: %{x}<br>'
@@ -715,17 +852,17 @@ def create_port_heatmap( df_packets: pd.DataFrame ) -> go.Figure:
 			               '<extra></extra>'), ) ] )
 	
 	figure.update_layout( title='Destination Port Activity', xaxis_title='Destination Port',
-		yaxis_title='Protocol', )
+		yaxis_title='Protocol', uirevision='destination-port-activity', )
 	
-	return configure_figure( figure, height=390, show_legend=False, )
+	return configure_figure( figure, SUMMARY_CHART_HEIGHT, False, )
 
-def create_packet_size_figure( df_packets: pd.DataFrame ) -> go.Figure:
+def create_packet_size_figure( df_packets: pd.DataFrame, ) -> go.Figure:
 	"""
 	Create the packet-size distribution figure.
 
 	Purpose:
-	    Displays the frequency distribution of packet lengths with average and median
-	    reference markers.
+	    Displays the frequency distribution of packet lengths with fixed bin boundaries and
+	    average and median reference markers.
 
 	Args:
 	    df_packets (pd.DataFrame): Filtered packet records.
@@ -733,34 +870,46 @@ def create_packet_size_figure( df_packets: pd.DataFrame ) -> go.Figure:
 	Returns:
 	    go.Figure: Packet-size histogram.
 	"""
-	throw_if( 'df_packets', df_packets )
+	throw_if( 'df_packets', df_packets, )
 	
-	df_sizes = df_packets.dropna( subset=[ 'length', 'protocol' ], ).copy( )
+	df_sizes = df_packets.dropna( subset=[ 'length', 'protocol', ], ).copy( )
 	
-	figure = px.histogram( df_sizes, x='length', color='protocol', nbins=35, barmode='overlay',
-		opacity=0.72, color_discrete_map=PROTOCOL_COLORS,
-		category_orders={ 'protocol': [ 'TCP', 'UDP', 'ICMP' ], }, )
+	figure = go.Figure( )
 	
-	average_size = df_sizes[ 'length' ].mean( )
-	median_size = df_sizes[ 'length' ].median( )
+	for protocol in PROTOCOL_ORDER:
+		df_protocol_sizes = df_sizes[ df_sizes[ 'protocol' ] == protocol ]
+		
+		if df_protocol_sizes.empty:
+			continue
+		
+		figure.add_trace(
+			go.Histogram( x=df_protocol_sizes[ 'length' ], name=protocol, opacity=0.72,
+				marker={ 'color': PROTOCOL_COLORS[ protocol ], },
+				xbins={ 'start': 0, 'end': 1600, 'size': 50, },
+				hovertemplate=(f'<b>{protocol}</b><br>'
+				               'Packet Size: %{x:,} bytes<br>'
+				               'Frequency: %{y:,}'
+				               '<extra></extra>'), ) )
+	
+	average_size = (df_sizes[ 'length' ].mean( ))
+	
+	median_size = (df_sizes[ 'length' ].median( ))
 	
 	figure.add_vline( x=average_size, line_width=2, line_dash='dash', line_color=RED,
-		annotation_text=f'Average {average_size:,.0f}', annotation_position='top right', )
+		annotation_text=(f'Average {average_size:,.0f}'), annotation_position='top right', )
 	
 	figure.add_vline( x=median_size, line_width=2, line_dash='dot', line_color=AMBER,
-		annotation_text=f'Median {median_size:,.0f}', annotation_position='top left', )
-	
-	figure.update_traces( hovertemplate=('<b>%{fullData.name}</b><br>'
-	                                     'Packet Size: %{x:,} bytes<br>'
-	                                     'Frequency: %{y:,}'
-	                                     '<extra></extra>'), )
+		annotation_text=(f'Median {median_size:,.0f}'), annotation_position='top left', )
 	
 	figure.update_layout( title='Packet Size Distribution', xaxis_title='Packet Size — Bytes',
-		yaxis_title='Frequency', bargap=0.04, )
+		yaxis_title='Frequency', barmode='overlay', bargap=0.04,
+		uirevision='packet-size-distribution', )
 	
-	return configure_figure( figure, height=390, show_legend=True, )
+	figure.update_xaxes( range=[ 0, 1600, ], )
+	
+	return configure_figure( figure, SUMMARY_CHART_HEIGHT, True, )
 
-def create_flow_figure( df_packets: pd.DataFrame ) -> go.Figure:
+def create_flow_figure( df_packets: pd.DataFrame, ) -> go.Figure:
 	"""
 	Create the network-flow figure.
 
@@ -774,17 +923,21 @@ def create_flow_figure( df_packets: pd.DataFrame ) -> go.Figure:
 	Returns:
 	    go.Figure: Source-to-destination network-flow diagram.
 	"""
-	throw_if( 'df_packets', df_packets )
+	throw_if( 'df_packets', df_packets, )
 	
-	df_flows = (df_packets.dropna( subset=[ 'src_ip', 'dst_ip' ] ).groupby(
-		[ 'src_ip', 'dst_ip' ] ).size( ).rename( 'packets' ).reset_index( ).nlargest( 20,
-		'packets' ))
+	df_flows = (df_packets.dropna( subset=[ 'src_ip', 'dst_ip', ] ).groupby(
+		[ 'src_ip', 'dst_ip', ] ).size( ).rename( 'packets' ).reset_index( ).sort_values(
+		[ 'packets', 'src_ip', 'dst_ip', ], ascending=[ False, True, True, ], ).head( 20 ))
 	
-	source_labels = [ f'Source: {value}' for value in df_flows[ 'src_ip' ].unique( ) ]
+	source_values = sorted( df_flows[ 'src_ip' ].astype( str ).unique( ) )
 	
-	destination_labels = [ f'Destination: {value}' for value in df_flows[ 'dst_ip' ].unique( ) ]
+	destination_values = sorted( df_flows[ 'dst_ip' ].astype( str ).unique( ) )
 	
-	labels = source_labels + destination_labels
+	source_labels = [ f'Source: {value}' for value in source_values ]
+	
+	destination_labels = [ f'Destination: {value}' for value in destination_values ]
+	
+	labels = (source_labels + destination_labels)
 	
 	label_indexes = { label: index for index, label in enumerate( labels ) }
 	
@@ -801,22 +954,23 @@ def create_flow_figure( df_packets: pd.DataFrame ) -> go.Figure:
 			                                'Total Packets: %{value:,}'
 			                                '<extra></extra>'), },
 		link={ 'source': source_indexes, 'target': destination_indexes,
-			'value': df_flows[ 'packets' ], 'color': 'rgba( 0, 120, 252, 0.28 )',
+			'value': df_flows[ 'packets' ], 'color': ('rgba( 0, 120, 252, 0.28 )'),
 			'hovertemplate': ('%{source.label}<br>'
 			                  '→ %{target.label}<br>'
 			                  'Packets: %{value:,}'
 			                  '<extra></extra>'), }, ) ] )
 	
-	figure.update_layout( title='Network Flow Relationships', )
+	figure.update_layout( title='Network Flow Relationships',
+		uirevision='network-flow-relationships', )
 	
-	return configure_figure( figure, height=510, show_legend=False, )
+	return configure_figure( figure, FLOW_CHART_HEIGHT, False, )
 
-def prepare_packet_editor( df_packets: pd.DataFrame ) -> pd.DataFrame:
+def prepare_packet_editor( df_packets: pd.DataFrame, ) -> pd.DataFrame:
 	"""
 	Prepare packet records for the data editor.
 
 	Purpose:
-	    Formats, orders, and enriches packet records for read-only display through
+	    Formats, orders, and limits packet records for read-only display through
 	    st.data_editor().
 
 	Args:
@@ -825,17 +979,20 @@ def prepare_packet_editor( df_packets: pd.DataFrame ) -> pd.DataFrame:
 	Returns:
 	    pd.DataFrame: Display-ready packet records.
 	"""
-	throw_if( 'df_packets', df_packets )
+	throw_if( 'df_packets', df_packets, )
 	
 	df_editor = df_packets.copy( )
 	
 	df_editor[ 'timestamp' ] = pd.to_datetime( df_editor[ 'timestamp' ], errors='coerce', )
 	
-	df_editor[ 'src_port' ] = df_editor[ 'src_port' ].astype( 'Int64' )
-	df_editor[ 'dst_port' ] = df_editor[ 'dst_port' ].astype( 'Int64' )
-	df_editor[ 'length' ] = df_editor[ 'length' ].astype( 'Int64' )
+	df_editor[ 'src_port' ] = (df_editor[ 'src_port' ].astype( 'Int64' ))
 	
-	df_editor = df_editor.sort_values( 'timestamp', ascending=False, )
+	df_editor[ 'dst_port' ] = (df_editor[ 'dst_port' ].astype( 'Int64' ))
+	
+	df_editor[ 'length' ] = (df_editor[ 'length' ].astype( 'Int64' ))
+	
+	df_editor = (
+		df_editor.sort_values( 'timestamp', ascending=False, ).head( PACKET_EDITOR_ROW_LIMIT ))
 	
 	column_order = [ 'timestamp', 'protocol', 'src_ip', 'src_port', 'dst_ip', 'dst_port', 'flags',
 		'length', 'session', ]
@@ -846,12 +1003,12 @@ def prepare_packet_editor( df_packets: pd.DataFrame ) -> pd.DataFrame:
 	return df_editor[ existing_columns ]
 
 # ==========================================================================================
-# PART 7 — Thread State Maintenance
+# PART 9 — Thread State Maintenance
 # ==========================================================================================
 
-current_thread = st.session_state.live_thread
+current_thread = (st.session_state.live_thread)
 
-if current_thread is not None and not current_thread.is_alive( ):
+if (current_thread is not None and not current_thread.is_alive( )):
 	st.session_state.live_thread = None
 
 capture_error = drain_capture_errors( )
@@ -862,30 +1019,32 @@ if capture_error:
 	stop_capture_thread( )
 
 # ==========================================================================================
-# PART 8 — Header / Branding
+# PART 10 — Header / Branding
 # ==========================================================================================
 
 with st.container( ):
-	col_logo, col_title = st.columns( [ 5, 1 ] )
+	col_logo, col_title = st.columns( [ 5, 1, ] )
 	
 	with col_logo:
 		st.markdown( '### Network Analyzer' )
+		
 		st.caption( 'Packet Metadata • Flow Analytics • Protocol Intelligence' )
 	
 	with col_title:
 		st.caption( '' )
 
 # ==========================================================================================
-# PART 9 — Sidebar Controls
+# PART 11 — Sidebar Controls
 # ==========================================================================================
 
 with st.sidebar:
-	st.markdown( BLUE_DIVIDER, unsafe_allow_html=True )
+	st.markdown( BLUE_DIVIDER, unsafe_allow_html=True, )
+	
 	st.subheader( 'Controls' )
 	
 	mode = st.radio( ' ', options=[ 'Demo / Replay', 'Live (Scapy)', ], )
 	
-	if mode == 'Live (Scapy)' and not SCAPY_AVAILABLE:
+	if (mode == 'Live (Scapy)' and not SCAPY_AVAILABLE):
 		st.error( 'Scapy is not available. Install Scapy and run the application with '
 		          'administrator/root privileges.' )
 		
@@ -902,6 +1061,7 @@ with st.sidebar:
 			if mode == 'Live (Scapy)':
 				if not SCAPY_AVAILABLE:
 					st.session_state.running = False
+					
 					st.session_state.capture_error = (
 						'Live capture cannot start because Scapy is unavailable.')
 				else:
@@ -927,136 +1087,226 @@ with st.sidebar:
 	if st.session_state.capture_error:
 		st.error( st.session_state.capture_error )
 	
-	st.markdown( BLUE_DIVIDER, unsafe_allow_html=True )
+	st.markdown( BLUE_DIVIDER, unsafe_allow_html=True, )
+	
 	st.subheader( 'Filters' )
 	
-	proto_filter = st.multiselect( 'Protocols', options=[ 'TCP', 'UDP', 'ICMP', ],
-		default=[ 'TCP', 'UDP', 'ICMP', ], )
+	proto_filter = st.multiselect( 'Protocols', options=PROTOCOL_ORDER, default=PROTOCOL_ORDER, )
 	
-	port_range = st.slider( 'Destination Port Range', 0, 65535, (0, 65535), )
+	port_range = st.slider( 'Destination Port Range', 0, 65535, (0, 65535,), )
 	
 	window_size = st.slider( 'Rolling Window (Packets)', 50, 2000, 500, 50, )
 
 # ==========================================================================================
-# PART 10 — Packet Ingestion
+# PART 12 — Real-Time Summary Fragment
 # ==========================================================================================
 
-if st.session_state.running:
-	if st.session_state.capture_mode == 'Demo / Replay':
-		for _ in range( random.randint( 5, 15 ) ):
-			packet = generate_demo_packet( st.session_state.session_id )
+@st.fragment( run_every=REALTIME_REFRESH_INTERVAL )
+def render_realtime_summary( protocols: List[ str ], destination_ports: tuple[ int, int ],
+	packet_window_size: int, ) -> None:
+	"""
+	Render the real-time dashboard summary.
+
+	Purpose:
+	    Ingests newly available packet records and refreshes executive metrics and the
+	    traffic-over-time visualization independently from the application shell.
+
+	Args:
+	    protocols (List[str]): Protocol values included in the rendered snapshot.
+	    destination_ports (tuple[int, int]): Inclusive destination-port range.
+	    packet_window_size (int): Maximum number of retained packet records.
+
+	Returns:
+	    None: This function renders Streamlit components.
+	"""
+	throw_if( 'protocols', protocols, )
+	
+	throw_if( 'destination_ports', destination_ports, )
+	
+	throw_if( 'packet_window_size', packet_window_size, )
+	
+	ingest_packets( packet_window_size )
+	
+	df_packets = create_packet_snapshot( st.session_state.packets, protocols, destination_ports, )
+	
+	with st.container( ):
+		m1, m2, m3, m4, m5 = st.columns( 5 )
+		
+		packet_count = len( df_packets )
+		
+		source_count = (df_packets[ 'src_ip' ].nunique( ) if not df_packets.empty else 0)
+		
+		destination_count = (df_packets[ 'dst_ip' ].nunique( ) if not df_packets.empty else 0)
+		
+		average_packet_size = (int( df_packets[ 'length' ].mean( ) ) if not df_packets.empty
+		                       else 0)
+		
+		protocol_count = (df_packets[ 'protocol' ].nunique( ) if not df_packets.empty else 0)
+		
+		m1.metric( 'Packets', f'{packet_count:,}', )
+		
+		m2.metric( 'Unique Src IPs', f'{source_count:,}', )
+		
+		m3.metric( 'Unique Dst IPs', f'{destination_count:,}', )
+		
+		m4.metric( 'Avg Packet Size', f'{average_packet_size:,} B', )
+		
+		m5.metric( 'Protocols Seen', f'{protocol_count:,}', )
+		
+		st.markdown( BLUE_DIVIDER, unsafe_allow_html=True, )
+		
+		if not df_packets.empty:
+			figure_traffic = create_traffic_figure( df_packets )
 			
-			st.session_state.packets.append( packet )
-	
-	elif (st.session_state.capture_mode == 'Live (Scapy)' and SCAPY_AVAILABLE):
-		captured_packet_count = drain_packet_queue( st.session_state.session_id )
+			st.plotly_chart( figure_traffic, use_container_width=True, config=CHART_CONFIG,
+				key='traffic-over-time-chart', )
+		else:
+			with st.container( height=SUMMARY_CHART_HEIGHT ):
+				st.info( 'No time-series data is available.' )
 		
-		st.session_state.captured_packet_count += captured_packet_count
-		
-		capture_error = drain_capture_errors( )
-		
-		if capture_error:
-			st.session_state.capture_error = capture_error
-			st.session_state.running = False
-			stop_capture_thread( )
-	
-	st.session_state.packets = st.session_state.packets[ -window_size: ]
+		st.markdown( BLUE_DIVIDER, unsafe_allow_html=True, )
+
+render_realtime_summary( proto_filter, port_range, window_size, )
 
 # ==========================================================================================
-# PART 11 — DataFrame Assembly and Filtering
+# PART 13 — Packet Analysis Fragment
 # ==========================================================================================
 
-df_packets = pd.DataFrame( st.session_state.packets )
+@st.fragment( run_every=ANALYSIS_REFRESH_INTERVAL )
+def render_packet_analysis( protocols: List[ str ], destination_ports: tuple[ int, int ], ) -> None:
+	"""
+	Render packet-level analytical visualizations.
 
-if not df_packets.empty:
-	df_packets[ 'timestamp' ] = pd.to_datetime( df_packets[ 'timestamp' ], errors='coerce', )
-	
-	df_packets = df_packets[ df_packets[ 'protocol' ].isin( proto_filter ) ]
-	
-	df_packets = df_packets[ df_packets[ 'dst_port' ].isna( ) | (
-			(df_packets[ 'dst_port' ] >= port_range[ 0 ]) & (
-				df_packets[ 'dst_port' ] <= port_range[ 1 ])) ]
+	Purpose:
+	    Refreshes protocol composition, endpoint rankings, packet-size distribution, and
+	    the read-only packet editor independently from real-time ingestion.
 
-# ==========================================================================================
-# PART 12 — Executive Metrics
-# ==========================================================================================
+	Args:
+	    protocols (List[str]): Protocol values included in the rendered snapshot.
+	    destination_ports (tuple[int, int]): Inclusive destination-port range.
 
-with st.container( ):
-	m1, m2, m3, m4, m5 = st.columns( 5 )
+	Returns:
+	    None: This function renders Streamlit components.
+	"""
+	throw_if( 'protocols', protocols, )
 	
-	packet_count = len( df_packets )
+	throw_if( 'destination_ports', destination_ports, )
 	
-	source_count = (df_packets[ 'src_ip' ].nunique( ) if not df_packets.empty else 0)
+	df_packets = create_packet_snapshot( st.session_state.packets, protocols, destination_ports, )
 	
-	destination_count = (df_packets[ 'dst_ip' ].nunique( ) if not df_packets.empty else 0)
-	
-	average_packet_size = (int( df_packets[ 'length' ].mean( ) ) if not df_packets.empty else 0)
-	
-	protocol_count = (df_packets[ 'protocol' ].nunique( ) if not df_packets.empty else 0)
-	
-	m1.metric( 'Packets', f'{packet_count:,}', )
-	
-	m2.metric( 'Unique Src IPs', f'{source_count:,}', )
-	
-	m3.metric( 'Unique Dst IPs', f'{destination_count:,}', )
-	
-	m4.metric( 'Avg Packet Size', f'{average_packet_size:,} B', )
-	
-	m5.metric( 'Protocols Seen', f'{protocol_count:,}', )
-	
-	st.markdown( BLUE_DIVIDER, unsafe_allow_html=True )
-
-# ==========================================================================================
-# PART 13 — Analytical Visualizations
-# ==========================================================================================
-
-if not df_packets.empty:
-	# --------------------------------------------------------------------------------------
-	# Protocol Composition and Traffic Trend
-	# --------------------------------------------------------------------------------------
-	protocol_column, traffic_column = st.columns( [ 0.82, 1.38 ], gap='medium', )
-	
-	with protocol_column:
-		figure_protocol = create_protocol_figure( df_packets )
+	if not df_packets.empty:
+		protocol_column, size_column = st.columns( [ 0.82, 1.38, ], gap='medium', )
 		
-		st.plotly_chart( figure_protocol, use_container_width=True, config=CHART_CONFIG,
-			key='protocol-composition-chart', )
-	
-	with traffic_column:
-		figure_traffic = create_traffic_figure( df_packets )
+		with protocol_column:
+			figure_protocol = create_protocol_figure( df_packets )
+			
+			st.plotly_chart( figure_protocol, use_container_width=True, config=CHART_CONFIG,
+				key='protocol-composition-chart', )
 		
-		st.plotly_chart( figure_traffic, use_container_width=True, config=CHART_CONFIG,
-			key='traffic-over-time-chart', )
-	
-	st.markdown( BLUE_DIVIDER, unsafe_allow_html=True )
-	
-	# --------------------------------------------------------------------------------------
-	# Endpoint Activity
-	# --------------------------------------------------------------------------------------
-	source_column, destination_column = st.columns( 2, gap='medium', )
-	
-	with source_column:
-		figure_sources = create_endpoint_figure( df_packets, 'src_ip', 'Top Source IP Addresses', )
+		with size_column:
+			figure_sizes = create_packet_size_figure( df_packets )
+			
+			st.plotly_chart( figure_sizes, use_container_width=True, config=CHART_CONFIG,
+				key='packet-size-histogram', )
 		
-		st.plotly_chart( figure_sources, use_container_width=True, config=CHART_CONFIG,
-			key='top-source-chart', )
-	
-	with destination_column:
-		figure_destinations = create_endpoint_figure( df_packets, 'dst_ip',
-			'Top Destination IP Addresses', )
+		st.markdown( BLUE_DIVIDER, unsafe_allow_html=True, )
 		
-		st.plotly_chart( figure_destinations, use_container_width=True, config=CHART_CONFIG,
-			key='top-destination-chart', )
+		source_column, destination_column = st.columns( 2, gap='medium', )
+		
+		with source_column:
+			figure_sources = create_endpoint_figure( df_packets, 'src_ip',
+				'Top Source IP Addresses', )
+			
+			st.plotly_chart( figure_sources, use_container_width=True, config=CHART_CONFIG,
+				key='top-source-chart', )
+		
+		with destination_column:
+			figure_destinations = create_endpoint_figure( df_packets, 'dst_ip',
+				'Top Destination IP Addresses', )
+			
+			st.plotly_chart( figure_destinations, use_container_width=True, config=CHART_CONFIG,
+				key='top-destination-chart', )
+		
+		st.markdown( BLUE_DIVIDER, unsafe_allow_html=True, )
+	else:
+		empty_left, empty_right = st.columns( 2 )
+		
+		with empty_left:
+			with st.container( height=SUMMARY_CHART_HEIGHT ):
+				st.info( 'No protocol data is available.' )
+		
+		with empty_right:
+			with st.container( height=SUMMARY_CHART_HEIGHT ):
+				st.info( 'No packet-size data is available.' )
+		
+		st.markdown( BLUE_DIVIDER, unsafe_allow_html=True, )
 	
-	st.markdown( BLUE_DIVIDER, unsafe_allow_html=True )
+	st.markdown( """
+		<div class="sloppy-section-title">Live Packet Stream</div>
+		<div class="sloppy-section-caption">
+			Most recent normalized packets matching the active protocol and port filters.
+		</div>
+		""", unsafe_allow_html=True, )
 	
-	# --------------------------------------------------------------------------------------
-	# Port Activity and Packet Sizes
-	# --------------------------------------------------------------------------------------
-	port_column, size_column = st.columns( 2, gap='medium', )
+	if not df_packets.empty:
+		df_packet_editor = prepare_packet_editor( df_packets )
+		st.data_editor( df_packet_editor, disabled=True, hide_index=True, use_container_width=True,
+			height=PACKET_EDITOR_HEIGHT,
+			column_order=[ 'timestamp', 'protocol', 'src_ip', 'src_port', 'dst_ip', 'dst_port',
+				'flags', 'length', 'session', ], column_config={
+				'timestamp': st.column_config.DatetimeColumn( 'Timestamp',
+					help='UTC packet-capture time.', format='HH:mm:ss.SSS', ),
+				'protocol': st.column_config.TextColumn( 'Protocol',
+					help='Detected transport or control protocol.', width='small', ),
+				'src_ip': st.column_config.TextColumn( 'Source IP',
+					help='Packet source IPv4 address.', width='medium', ),
+				'src_port': st.column_config.NumberColumn( 'Source Port',
+					help='Source transport-layer port.', format='%d', width='small', ),
+				'dst_ip': st.column_config.TextColumn( 'Destination IP',
+					help='Packet destination IPv4 address.', width='medium', ),
+				'dst_port': st.column_config.NumberColumn( 'Destination Port',
+					help='Destination transport-layer port.', format='%d', width='small', ),
+				'flags': st.column_config.TextColumn( 'Flags',
+					help='TCP flags or ICMP message type.', width='medium', ),
+				'length': st.column_config.NumberColumn( 'Packet Size',
+					help='Captured packet length in bytes.', format='%d bytes', width='small', ),
+				'session': st.column_config.TextColumn( 'Session',
+					help='Capture-session identifier.', width='medium', ), },
+			key='live-packet-editor', )
+	else:
+		with st.container( height=PACKET_EDITOR_HEIGHT ):
+			st.info( 'Waiting for packets…' )
 	
-	with port_column:
-		df_port_packets = df_packets.dropna( subset=[ 'dst_port' ], )
+	st.markdown( BLUE_DIVIDER, unsafe_allow_html=True, )
+
+render_packet_analysis( proto_filter, port_range, )
+
+# ==========================================================================================
+# PART 14 — Flow Analysis Fragment
+# ==========================================================================================
+
+@st.fragment( run_every=FLOW_REFRESH_INTERVAL )
+def render_flow_analysis( protocols: List[ str ], destination_ports: tuple[ int, int ], ) -> None:
+	"""
+	Render expensive flow visualizations.
+
+	Purpose:
+	    Refreshes destination-port concentration and source-to-destination flow analysis
+	    on a reduced cadence to limit browser redraw and Plotly reconstruction costs.
+
+	Args:
+	    protocols (List[str]): Protocol values included in the rendered snapshot.
+	    destination_ports (tuple[int, int]): Inclusive destination-port range.
+
+	Returns:
+	    None: This function renders Streamlit components.
+	"""
+	throw_if( 'protocols', protocols, )
+	throw_if( 'destination_ports', destination_ports, )
+	df_packets = create_packet_snapshot( st.session_state.packets, protocols, destination_ports, )
+	
+	if not df_packets.empty:
+		df_port_packets = df_packets.dropna( subset=[ 'dst_port', ] )
 		
 		if not df_port_packets.empty:
 			figure_ports = create_port_heatmap( df_packets )
@@ -1064,86 +1314,37 @@ if not df_packets.empty:
 			st.plotly_chart( figure_ports, use_container_width=True, config=CHART_CONFIG,
 				key='destination-port-heatmap', )
 		else:
-			st.info( 'No destination-port data is available for the current filters.' )
-	
-	with size_column:
-		figure_sizes = create_packet_size_figure( df_packets )
+			with st.container( height=SUMMARY_CHART_HEIGHT ):
+				st.info( 'No destination-port data is available for the current filters.' )
 		
-		st.plotly_chart( figure_sizes, use_container_width=True, config=CHART_CONFIG,
-			key='packet-size-histogram', )
-	
-	st.markdown( BLUE_DIVIDER, unsafe_allow_html=True )
-	
-	# --------------------------------------------------------------------------------------
-	# Source-to-Destination Network Flow
-	# --------------------------------------------------------------------------------------
-	df_flow_packets = df_packets.dropna( subset=[ 'src_ip', 'dst_ip', ], )
-	
-	if not df_flow_packets.empty:
-		figure_flow = create_flow_figure( df_packets )
+		st.markdown( BLUE_DIVIDER, unsafe_allow_html=True, )
 		
-		st.plotly_chart( figure_flow, use_container_width=True, config=CHART_CONFIG,
-			key='network-flow-sankey', )
+		df_flow_packets = df_packets.dropna( subset=[ 'src_ip', 'dst_ip', ] )
+		
+		if not df_flow_packets.empty:
+			figure_flow = create_flow_figure( df_packets )
+			
+			st.plotly_chart( figure_flow, use_container_width=True, config=CHART_CONFIG,
+				key='network-flow-sankey', )
+		else:
+			with st.container( height=FLOW_CHART_HEIGHT ):
+				st.info( 'No source-to-destination flow data is available.' )
 	else:
-		st.info( 'No source-to-destination flow data is available.' )
+		with st.container( height=SUMMARY_CHART_HEIGHT ):
+			st.info( 'No destination-port activity is available.' )
+		
+		st.markdown( BLUE_DIVIDER, unsafe_allow_html=True, )
+		
+		with st.container( height=FLOW_CHART_HEIGHT ):
+			st.info( 'No source-to-destination flow data is available.' )
 	
-	st.markdown( BLUE_DIVIDER, unsafe_allow_html=True )
-else:
-	empty_left, empty_right = st.columns( 2 )
-	
-	with empty_left:
-		st.info( 'No protocol data is available.' )
-	
-	with empty_right:
-		st.info( 'No time-series data is available.' )
-	
-	st.markdown( BLUE_DIVIDER, unsafe_allow_html=True )
+	st.markdown( BLUE_DIVIDER, unsafe_allow_html=True, )
+
+render_flow_analysis( proto_filter, port_range, )
 
 # ==========================================================================================
-# PART 14 — Live Packet Stream
+# PART 15 — Footer
 # ==========================================================================================
-
-st.markdown( """
-	<div class="sloppy-section-title">Live Packet Stream</div>
-	<div class="sloppy-section-caption">
-		Most recent normalized packets matching the active protocol and port filters.
-	</div>
-	""", unsafe_allow_html=True, )
-
-if not df_packets.empty:
-	df_packet_editor = prepare_packet_editor( df_packets )
-	
-	st.data_editor( df_packet_editor, disabled=True, hide_index=True, use_container_width=True,
-		height=460,
-		column_order=[ 'timestamp', 'protocol', 'src_ip', 'src_port', 'dst_ip', 'dst_port',
-			'flags',
-			'length', 'session', ], column_config={
-			'timestamp': st.column_config.DatetimeColumn( 'Timestamp',
-				help='UTC packet-capture time.', format='HH:mm:ss.SSS', ),
-			'protocol': st.column_config.TextColumn( 'Protocol',
-				help='Detected transport or control protocol.', width='small', ),
-			'src_ip': st.column_config.TextColumn( 'Source IP', help='Packet source IPv4 address.',
-				width='medium', ), 'src_port': st.column_config.NumberColumn( 'Source Port',
-				help='Source transport-layer port.', format='%d', width='small', ),
-			'dst_ip': st.column_config.TextColumn( 'Destination IP',
-				help='Packet destination IPv4 address.', width='medium', ),
-			'dst_port': st.column_config.NumberColumn( 'Destination Port',
-				help='Destination transport-layer port.', format='%d', width='small', ),
-			'flags': st.column_config.TextColumn( 'Flags', help='TCP flags or ICMP message type.',
-				width='medium', ), 'length': st.column_config.NumberColumn( 'Packet Size',
-				help='Captured packet length in bytes.', format='%d bytes', width='small', ),
-			'session': st.column_config.TextColumn( 'Session', help='Capture-session identifier.',
-				width='medium', ), }, key='live-packet-editor', )
-else:
-	st.info( 'Waiting for packets…' )
 
 st.caption( 'Sloppy Network Analyzer — Live capture via Scapy enabled. '
             'Run with administrator/root privileges for full functionality.' )
-
-# ==========================================================================================
-# PART 15 — Active Refresh Cycle
-# ==========================================================================================
-
-if st.session_state.running:
-	time.sleep( 0.25 )
-	st.rerun( )
