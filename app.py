@@ -3050,7 +3050,6 @@ with st.sidebar:
 	# Expander - Sidebar Controls
 	# ----------------------------------------------------
 	st.markdown( cfg.BLUE_DIVIDER, unsafe_allow_html=True, )
-	
 	with st.expander( label='Controls', expanded=False, ):
 		mode = st.radio( 'Capture Mode', options=[ 'Demo / Replay', 'Live (Scapy)', ],
 			label_visibility='collapsed', )
@@ -3065,12 +3064,10 @@ with st.sidebar:
 		st.divider( )
 		
 		c1, c2 = st.columns( 2 )
-		
 		with c1:
 			if st.button( '▶ Start', use_container_width=True, ):
 				st.session_state.capture_error = ''
 				st.session_state.capture_mode = mode
-				
 				if mode == 'Live (Scapy)':
 					if not SCAPY_AVAILABLE:
 						st.session_state.running = False
@@ -3079,11 +3076,9 @@ with st.sidebar:
 							'Live capture cannot start because Scapy is unavailable.')
 					else:
 						st.session_state.running = True
-						
 						start_capture_thread( )
 				else:
 					stop_capture_thread( )
-					
 					st.session_state.running = True
 				
 				st.rerun( )
@@ -3091,9 +3086,7 @@ with st.sidebar:
 		with c2:
 			if st.button( '■ Stop', use_container_width=True, ):
 				st.session_state.running = False
-				
 				stop_capture_thread( )
-				
 				st.rerun( )
 		
 		st.divider( )
@@ -3124,7 +3117,6 @@ with st.sidebar:
 	application_protocol_filter = cfg.APPLICATION_PROTOCOL_ORDER.copy( )
 	dns_query_type_filter = cfg.DNS_QUERY_TYPE_ORDER.copy( )
 	http_method_filter = cfg.HTTP_METHOD_ORDER.copy( )
-	
 	with st.expander( label='Filters', expanded=False, ):
 		if analysis_mode == cfg.ANALYSIS_MODE_DATA_LINK:
 			ether_type_filter = st.multiselect( 'EtherTypes', options=cfg.ETHER_TYPE_ORDER,
@@ -3152,8 +3144,7 @@ with st.sidebar:
 				options=[ 'Bidirectional', 'One-Way', ], default=[ 'Bidirectional', 'One-Way', ], )
 			st.divider( )
 			minimum_session_duration = st.number_input( 'Minimum Duration — Seconds',
-				min_value=0.0,
-				value=0.0, step=0.1, )
+				min_value=0.0, value=0.0, step=0.1, )
 		elif analysis_mode == cfg.ANALYSIS_MODE_PRESENTATION:
 			tls_version_filter = st.multiselect( 'TLS Versions', options=cfg.TLS_VERSION_ORDER,
 				default=cfg.TLS_VERSION_ORDER, )
@@ -3199,7 +3190,6 @@ def maintain_packet_capture( packet_window_size: int, ) -> None:
 	"""
 	try:
 		throw_if( 'packet_window_size', packet_window_size, )
-		
 		ingest_packets( packet_window_size )
 	except Error:
 		raise
@@ -3235,46 +3225,33 @@ def render_realtime_summary( protocols: List[ str ], destination_ports: tuple[ i
 	"""
 	try:
 		throw_if( 'protocols', protocols, )
-		
 		throw_if( 'destination_ports', destination_ports, )
-		
 		throw_if( 'packet_window_size', packet_window_size, )
-		
 		df_packets = create_packet_snapshot( st.session_state.packets, protocols,
 			destination_ports, )
 		
 		with st.container( ):
 			m1, m2, m3, m4, m5 = st.columns( 5 )
-			
 			packet_count = len( df_packets )
-			
 			source_count = (df_packets[ 'src_ip' ].nunique( ) if not df_packets.empty else 0)
-			
 			destination_count = (df_packets[ 'dst_ip' ].nunique( ) if not df_packets.empty else 0)
 			
 			average_packet_size = (
 				int( df_packets[ 'length' ].mean( ) ) if not df_packets.empty else 0)
 			
 			protocol_count = (df_packets[ 'protocol' ].nunique( ) if not df_packets.empty else 0)
-			
 			m1.metric( 'Packets', f'{packet_count:,}', )
-			
 			m2.metric( 'Unique Src IPs', f'{source_count:,}', )
-			
 			m3.metric( 'Unique Dst IPs', f'{destination_count:,}', )
-			
 			m4.metric( 'Avg Packet Size', f'{average_packet_size:,} B', )
-			
 			m5.metric( 'Protocols Seen', f'{protocol_count:,}', )
 			
 			st.markdown( cfg.BLUE_DIVIDER, unsafe_allow_html=True, )
 		
 		traffic_column, throughput_column = st.columns( 2, gap='medium', border=True, )
-		
 		with traffic_column:
 			if not df_packets.empty:
 				figure_traffic = create_traffic_figure( df_packets )
-				
 				st.plotly_chart( figure_traffic, use_container_width=True, config=cfg.CHART_CONFIG,
 					key='traffic-over-time-chart', )
 			else:
@@ -3295,6 +3272,7 @@ def render_realtime_summary( protocols: List[ str ], destination_ports: tuple[ i
 					st.info( 'No throughput data is available.' )
 		
 		st.markdown( cfg.BLUE_DIVIDER, unsafe_allow_html=True, )
+		
 	except Error:
 		raise
 	except Exception as e:
@@ -3328,9 +3306,7 @@ def render_packet_analysis( protocols: List[ str ], destination_ports: tuple[ in
 	"""
 	try:
 		throw_if( 'protocols', protocols, )
-		
 		throw_if( 'destination_ports', destination_ports, )
-		
 		df_packets = create_packet_snapshot( st.session_state.packets, protocols,
 			destination_ports, )
 		
@@ -3340,21 +3316,18 @@ def render_packet_analysis( protocols: List[ str ], destination_ports: tuple[ in
 			
 			with protocol_column:
 				figure_protocol = create_protocol_figure( df_packets )
-				
 				st.plotly_chart( figure_protocol, use_container_width=True,
 					config=cfg.CHART_CONFIG,
 					key='protocol-composition-chart', )
 			
 			with size_column:
 				figure_sizes = create_packet_size_figure( df_packets )
-				
 				st.plotly_chart( figure_sizes, use_container_width=True, config=cfg.CHART_CONFIG,
 					key='packet-size-histogram', )
 			
 			st.markdown( cfg.BLUE_DIVIDER, unsafe_allow_html=True, )
 			
 			source_column, destination_column = st.columns( 2, gap='medium', border=True, )
-			
 			with source_column:
 				figure_sources = create_endpoint_figure( df_packets, 'src_ip',
 					'Top Source IP Addresses', )
@@ -3370,6 +3343,7 @@ def render_packet_analysis( protocols: List[ str ], destination_ports: tuple[ in
 					config=cfg.CHART_CONFIG, key='top-destination-chart', )
 			
 			st.markdown( cfg.BLUE_DIVIDER, unsafe_allow_html=True, )
+			
 		else:
 			empty_left, empty_right = st.columns( 2, border=True, )
 			
@@ -3392,7 +3366,6 @@ def render_packet_analysis( protocols: List[ str ], destination_ports: tuple[ in
 		
 		if not df_packets.empty:
 			df_packet_editor = prepare_packet_editor( df_packets )
-			
 			st.data_editor( df_packet_editor, disabled=True, hide_index=True,
 				use_container_width=True, height=cfg.PACKET_EDITOR_HEIGHT,
 				column_order=[ 'timestamp', 'protocol', 'src_ip', 'src_port', 'dst_ip', 'dst_port',
@@ -3455,9 +3428,7 @@ def render_flow_analysis( protocols: List[ str ], destination_ports: tuple[ int,
 	"""
 	try:
 		throw_if( 'protocols', protocols, )
-		
 		throw_if( 'destination_ports', destination_ports, )
-		
 		df_packets = create_packet_snapshot( st.session_state.packets, protocols,
 			destination_ports, )
 		
@@ -3605,6 +3576,7 @@ def render_flow_analysis( protocols: List[ str ], destination_ports: tuple[ int,
 				st.info( 'No five-tuple flow data is available for the current filters.' )
 		
 		st.markdown( cfg.BLUE_DIVIDER, unsafe_allow_html=True, )
+		
 	except Error:
 		raise
 	except Exception as e:
@@ -3658,7 +3630,9 @@ def render_data_link_analysis( ether_types: List[ str ], frame_classes: List[ st
 			f"{int( df_packets[ 'is_multicast' ].sum( ) ):,}" if not df_packets.empty else '0' )
 		m6.metric( 'VLANs',
 			f"{df_packets[ 'vlan_id' ].nunique( ):,}" if not df_packets.empty else '0' )
+		
 		st.markdown( cfg.BLUE_DIVIDER, unsafe_allow_html=True, )
+		
 		if df_packets.empty:
 			with st.container( height=cfg.SUMMARY_CHART_HEIGHT, border=True, ):
 				st.info( 'No Data Link records match the active filters.' )
@@ -3670,7 +3644,9 @@ def render_data_link_analysis( ether_types: List[ str ], frame_classes: List[ st
 		with right:
 			render_category_analysis( df_packets, 'frame_class', 'Frame Classification',
 				'data-link-frame-classes', count_label='Frame Count', chart_style='vertical', )
+			
 		st.markdown( cfg.BLUE_DIVIDER, unsafe_allow_html=True, )
+		
 		left, right = st.columns( 2, gap='medium', border=True, )
 		with left:
 			render_category_analysis( df_packets, 'src_mac', 'Top Source MAC Addresses',
@@ -3678,7 +3654,9 @@ def render_data_link_analysis( ether_types: List[ str ], frame_classes: List[ st
 		with right:
 			render_category_analysis( df_packets, 'dst_mac', 'Top Destination MAC Addresses',
 				'data-link-destination-macs', count_label='Frame Count', )
+			
 		st.markdown( cfg.BLUE_DIVIDER, unsafe_allow_html=True, )
+		
 		left, right = st.columns( 2, gap='medium', border=True, )
 		with left:
 			render_category_analysis( df_packets, 'arp_operation', 'ARP Operations',
@@ -3686,27 +3664,37 @@ def render_data_link_analysis( ether_types: List[ str ], frame_classes: List[ st
 		with right:
 			st.plotly_chart( create_data_link_timeline( df_packets ), use_container_width=True,
 				config=cfg.CHART_CONFIG, key='data-link-timeline', )
+			
 		st.markdown( cfg.BLUE_DIVIDER, unsafe_allow_html=True, )
+		
 		left, right = st.columns( 2, gap='medium', border=True, )
 		with left:
 			st.plotly_chart( create_arp_matrix_figure( df_packets ), use_container_width=True,
 				config=cfg.CHART_CONFIG, key='data-link-arp-matrix', )
 		with right:
 			render_category_analysis( df_packets, 'vlan_id', 'VLAN Activity', 'data-link-vlan', )
+			
 		st.markdown( cfg.BLUE_DIVIDER, unsafe_allow_html=True, )
+		
 		render_category_analysis( df_packets, 'vlan_priority', 'VLAN Priority Activity',
 			'data-link-vlan-priority', )
+		
 		st.markdown( cfg.BLUE_DIVIDER, unsafe_allow_html=True, )
+		
 		st.plotly_chart( create_mac_ip_figure( df_packets ), use_container_width=True,
 			config=cfg.CHART_CONFIG, key='data-link-mac-ip', )
+		
 		st.markdown( cfg.BLUE_DIVIDER, unsafe_allow_html=True, )
+		
 		st.markdown( '<div class="sloppy-section-title">Data Link Frame Stream</div>'
 		             '<div class="sloppy-section-caption">Most recent Layer 2 records matching '
 		             'the '
 		             'active filters.</div>', unsafe_allow_html=True, )
 		st.data_editor( prepare_data_link_editor( df_packets ), disabled=True, hide_index=True,
 			use_container_width=True, height=cfg.PACKET_EDITOR_HEIGHT, key='data-link-editor', )
+		
 		st.markdown( cfg.BLUE_DIVIDER, unsafe_allow_html=True, )
+		
 	except Error:
 		raise
 	except Exception as e:
@@ -3987,10 +3975,9 @@ def create_category_figure( df_packets: pd.DataFrame, column_name: str, title: s
 		df_values[ column_name ] = df_values[ column_name ].fillna( '' ).astype( str ).str.strip( )
 		df_values.loc[ df_values[ column_name ] == '', column_name ] = 'Unknown'
 		df_values = (
-			df_values.groupby( column_name ).size( ).rename( 'packets' ).reset_index(
-			
-			).sort_values(
-				[ 'packets', column_name, ], ascending=[ True, True, ] ).tail( 15 ))
+			df_values.groupby( column_name ).size( ).rename(
+				'packets' ).reset_index().sort_values( [ 'packets', column_name, ],
+				ascending=[ True, True, ] ).tail( 15 ))
 		df_values[ column_name ] = df_values[ column_name ].astype( str )
 		category_order = df_values[ column_name ].tolist( )
 		maximum_packets = max( int( df_values[ 'packets' ].max( ) ), 1, )
@@ -4240,7 +4227,9 @@ def render_network_layer_analysis( ip_versions: List[ int ], address_scopes: Lis
 		m6.metric( 'ICMP / ICMPv6',
 			f"{int( df_packets[ 'protocol' ].isin( [ 'ICMP', 'ICMPv6', ] ).sum( ) ):,}" if not
 			df_packets.empty else '0' )
+		
 		st.markdown( cfg.BLUE_DIVIDER, unsafe_allow_html=True, )
+		
 		if df_packets.empty:
 			st.info( 'No Network Layer records match the active filters.' )
 			return
@@ -4254,16 +4243,22 @@ def render_network_layer_analysis( ip_versions: List[ int ], address_scopes: Lis
 			render_numeric_analysis( df_hops, 'effective_hop_limit', 'TTL / Hop-Limit '
 			                                                         'Distribution',
 				'l3-hop-limit', )
+			
 		st.markdown( cfg.BLUE_DIVIDER, unsafe_allow_html=True, )
+		
 		left, right = st.columns( 2, gap='medium', border=True, )
 		with left:
 			render_category_analysis( df_packets, 'address_scope', 'Destination Address Scope',
 				'l3-scope', )
 		with right:
 			render_category_analysis( df_packets, 'dscp', 'DSCP Activity', 'l3-dscp', )
+			
 		st.markdown( cfg.BLUE_DIVIDER, unsafe_allow_html=True, )
+		
 		render_category_analysis( df_packets, 'ecn', 'ECN Activity', 'l3-ecn', )
+		
 		st.markdown( cfg.BLUE_DIVIDER, unsafe_allow_html=True, )
+		
 		left, right = st.columns( 2, gap='medium', border=True, )
 		with left:
 			st.plotly_chart( create_timeline_figure( df_packets, 'is_fragmented',
@@ -4273,10 +4268,14 @@ def render_network_layer_analysis( ip_versions: List[ int ], address_scopes: Lis
 			df_icmp = df_packets[ df_packets[ 'protocol' ].isin( [ 'ICMP', 'ICMPv6', ] ) ]
 			render_category_analysis( df_icmp, 'icmp_type', 'ICMP Type Activity',
 				'l3-icmp-types', )
+			
 		st.markdown( cfg.BLUE_DIVIDER, unsafe_allow_html=True, )
+		
 		st.plotly_chart( create_subnet_matrix_figure( df_packets ), use_container_width=True,
 			config=cfg.CHART_CONFIG, key='l3-subnet-matrix', )
+		
 		st.markdown( cfg.BLUE_DIVIDER, unsafe_allow_html=True, )
+		
 		render_mode_editor( df_packets,
 			[ 'timestamp', 'ip_version', 'src_ip', 'dst_ip', 'ttl', 'hop_limit', 'ipv6_flow_label',
 				'dscp', 'ecn', 'ip_identification', 'ip_flags', 'fragment_offset',
@@ -4340,7 +4339,9 @@ def render_transport_analysis( protocols: List[ str ],
 			f"{int( df_packets[ 'out_of_order' ].sum( ) ):,}" if not df_packets.empty else '0' )
 		st.caption( 'Sequencing findings are indicators; capture loss and NIC offload can affect '
 		            'interpretation.' )
+		
 		st.markdown( cfg.BLUE_DIVIDER, unsafe_allow_html=True, )
+		
 		if df_packets.empty:
 			st.info( 'No Transport Layer records match the active filters.' )
 			return
@@ -4350,7 +4351,9 @@ def render_transport_analysis( protocols: List[ str ],
 		with right:
 			render_numeric_analysis( df_packets, 'tcp_window', 'TCP Window Distribution',
 				'l4-window', )
+			
 		st.markdown( cfg.BLUE_DIVIDER, unsafe_allow_html=True, )
+		
 		left, right = st.columns( 2, gap='medium', border=True, )
 		with left:
 			render_category_analysis( df_packets, 'src_port', 'Top Source Ports',
@@ -4358,7 +4361,9 @@ def render_transport_analysis( protocols: List[ str ],
 		with right:
 			render_category_analysis( df_packets, 'dst_port', 'Top Destination Ports',
 				'l4-destination-ports', )
+			
 		st.markdown( cfg.BLUE_DIVIDER, unsafe_allow_html=True, )
+		
 		left, right = st.columns( 2, gap='medium', border=True, )
 		with left:
 			st.plotly_chart(
@@ -4368,7 +4373,9 @@ def render_transport_analysis( protocols: List[ str ],
 		with right:
 			render_numeric_analysis( df_packets[ df_packets[ 'protocol' ] == 'UDP' ], 'udp_length',
 				'UDP Length Distribution', 'l4-udp-length', )
+			
 		st.markdown( cfg.BLUE_DIVIDER, unsafe_allow_html=True, )
+		
 		render_mode_editor( df_packets,
 			[ 'timestamp', 'protocol', 'src_ip', 'src_port', 'dst_ip', 'dst_port', 'flags',
 				'tcp_sequence', 'tcp_acknowledgment', 'tcp_window', 'tcp_header_length',
@@ -4434,7 +4441,9 @@ def render_session_analysis( protocols: List[ str ], directionality: List[ str ]
 		m6.metric( 'Total Bytes',
 			f"{int( df_conversations[ 'total_bytes' ].sum( ) ):,}" if not df_conversations.empty
 			else '0' )
+		
 		st.markdown( cfg.BLUE_DIVIDER, unsafe_allow_html=True, )
+		
 		if df_conversations.empty:
 			st.info( 'No conversations match the active filters.' )
 			return
@@ -4445,10 +4454,14 @@ def render_session_analysis( protocols: List[ str ], directionality: List[ str ]
 		with right:
 			render_category_analysis( df_conversations, 'session_state', 'TCP Session State',
 				'l5-state', )
+			
 		st.markdown( cfg.BLUE_DIVIDER, unsafe_allow_html=True, )
+		
 		render_category_analysis( df_conversations, 'activity_state', 'Session Activity State',
 			'l5-activity-state', )
+		
 		st.markdown( cfg.BLUE_DIVIDER, unsafe_allow_html=True, )
+		
 		figure = px.scatter( df_conversations, x='bytes_a_to_b', y='bytes_b_to_a',
 			size='total_packets', color='protocol',
 			hover_data=[ 'endpoint_a', 'endpoint_b', 'duration_seconds', 'session_state', ], )
@@ -4457,7 +4470,9 @@ def render_session_analysis( protocols: List[ str ], directionality: List[ str ]
 			yaxis_title='Bytes B → A', uirevision='session-directional-bytes', )
 		st.plotly_chart( configure_figure( figure, cfg.FLOW_CHART_HEIGHT, True, ),
 			use_container_width=True, config=cfg.CHART_CONFIG, key='l5-directional-bytes', )
+		
 		st.markdown( cfg.BLUE_DIVIDER, unsafe_allow_html=True, )
+		
 		render_mode_editor( df_conversations,
 			[ 'protocol', 'endpoint_a', 'endpoint_b', 'first_seen', 'last_seen',
 				'duration_seconds',
@@ -4521,7 +4536,9 @@ def render_presentation_analysis( tls_versions: List[ str ],
 		st.warning(
 			'TLS parsing accepts only complete records contained in one TCP payload. It does not '
 			'decrypt data or reassemble TLS records split across TCP segments.' )
+		
 		st.markdown( cfg.BLUE_DIVIDER, unsafe_allow_html=True, )
+		
 		if df_packets.empty:
 			st.info( 'No observable TLS metadata matches the active filters.' )
 			return
@@ -4532,17 +4549,23 @@ def render_presentation_analysis( tls_versions: List[ str ],
 		with right:
 			render_category_analysis( df_packets, 'tls_handshake_type', 'TLS Handshake Types',
 				'l6-handshake', )
+			
 		st.markdown( cfg.BLUE_DIVIDER, unsafe_allow_html=True, )
+		
 		left, right = st.columns( 2, gap='medium', border=True, )
 		with left:
 			render_category_analysis( df_packets, 'tls_server_name', 'Top TLS Server Names',
 				'l6-sni', )
 		with right:
 			render_category_analysis( df_packets, 'tls_alpn', 'ALPN Protocols', 'l6-alpn', )
+			
 		st.markdown( cfg.BLUE_DIVIDER, unsafe_allow_html=True, )
+		
 		render_category_analysis( df_packets, 'tls_cipher_suite', 'TLS Cipher Suites',
 			'l6-cipher', )
+		
 		st.markdown( cfg.BLUE_DIVIDER, unsafe_allow_html=True, )
+		
 		render_mode_editor( df_packets,
 			[ 'timestamp', 'src_ip', 'src_port', 'dst_ip', 'dst_port', 'tls_record_type',
 				'tls_version', 'tls_handshake_type', 'tls_server_name', 'tls_alpn',
@@ -4611,7 +4634,9 @@ def render_application_analysis( application_protocols: List[ str ], dns_query_t
 		m5.metric( 'NTP',
 			f"{int( (df_packets[ 'application_protocol' ] == 'NTP').sum( ) ):,}" if not
 			df_packets.empty else '0' )
+		
 		st.markdown( cfg.BLUE_DIVIDER, unsafe_allow_html=True, )
+		
 		if df_packets.empty:
 			st.info( 'No Application Layer metadata matches the active filters.' )
 			return
@@ -4623,7 +4648,9 @@ def render_application_analysis( application_protocols: List[ str ], dns_query_t
 			st.plotly_chart( create_timeline_figure( df_packets, 'application_protocol',
 				'Application Activity Over Time' ), use_container_width=True,
 				config=cfg.CHART_CONFIG, key='l7-timeline', )
+			
 		st.markdown( cfg.BLUE_DIVIDER, unsafe_allow_html=True, )
+		
 		left, right = st.columns( 2, gap='medium', border=True, )
 		with left:
 			df_dns = df_packets[ df_packets[ 'application_protocol' ] == 'DNS' ]
@@ -4631,9 +4658,13 @@ def render_application_analysis( application_protocols: List[ str ], dns_query_t
 		with right:
 			render_category_analysis( df_dns, 'dns_response_code', 'DNS Response Codes',
 				'l7-dns-rcode', )
+			
 		st.markdown( cfg.BLUE_DIVIDER, unsafe_allow_html=True, )
+		
 		render_category_analysis( df_dns, 'dns_query_type', 'DNS Query Types', 'l7-dns-type', )
+		
 		st.markdown( cfg.BLUE_DIVIDER, unsafe_allow_html=True, )
+		
 		left, right = st.columns( 2, gap='medium', border=True, )
 		with left:
 			df_http = df_packets[ df_packets[ 'application_protocol' ] == 'HTTP' ]
@@ -4641,14 +4672,18 @@ def render_application_analysis( application_protocols: List[ str ], dns_query_t
 		with right:
 			render_category_analysis( df_http, 'http_status', 'HTTP Status Codes',
 				'l7-http-status', )
+			
 		st.markdown( cfg.BLUE_DIVIDER, unsafe_allow_html=True, )
+		
 		left, right = st.columns( 2, gap='medium', border=True, )
 		with left:
 			render_category_analysis( df_packets, 'dhcp_message_type', 'DHCP Message Types',
 				'l7-dhcp', )
 		with right:
 			render_category_analysis( df_packets, 'ntp_mode', 'NTP Modes', 'l7-ntp', )
+			
 		st.markdown( cfg.BLUE_DIVIDER, unsafe_allow_html=True, )
+		
 		df_http_transactions = create_http_transaction_snapshot( df_packets, )
 		if not df_http_transactions.empty:
 			st.markdown( '<div class="sloppy-section-title">HTTP Transactions</div>',
@@ -4657,7 +4692,9 @@ def render_application_analysis( application_protocols: List[ str ], dns_query_t
 				[ 'request_time', 'response_time', 'client_ip', 'server_ip', 'http_method',
 					'http_host', 'http_path', 'http_status', 'response_seconds',
 					'transaction_state', ], 'http-transaction-editor', )
+			
 		st.markdown( cfg.BLUE_DIVIDER, unsafe_allow_html=True, )
+		
 		render_mode_editor( df_packets,
 			[ 'timestamp', 'application_protocol', 'src_ip', 'src_port', 'dst_ip', 'dst_port',
 				'dns_query', 'dns_query_type', 'dns_response_code', 'dns_question_count',
