@@ -1304,7 +1304,6 @@ st.logo( cfg.LOGO, size='large', )
 # ==========================================================================================
 #  Header & Sidebar Controls
 # ==========================================================================================
-
 with st.container( ):
 	col_logo, col_title = st.columns( [ 5, 1, ] )
 	with col_logo:
@@ -1315,59 +1314,68 @@ with st.container( ):
 		st.caption( '' )
 		
 with st.sidebar:
+	# ----------------------------------------------------
+	# Expander - Sidebar Controls
+	# ----------------------------------------------------
 	st.markdown( cfg.BLUE_DIVIDER, unsafe_allow_html=True, )
-	st.subheader( 'Controls' )
-	mode = st.radio( ' ', options=[ 'Demo / Replay', 'Live (Scapy)', ], )
-	if (mode == 'Live (Scapy)' and not SCAPY_AVAILABLE):
-		st.error( 'Scapy is not available. Install Scapy and run the application with '
-		          'administrator/root privileges.' )
-		
-		if SCAPY_IMPORT_ERROR:
-			st.caption( SCAPY_IMPORT_ERROR )
-	
-	c1, c2 = st.columns( 2 )
-	with c1:
-		if st.button( '▶ Start', use_container_width=True, ):
-			st.session_state.capture_error = ''
-			st.session_state.capture_mode = mode
-			if mode == 'Live (Scapy)':
-				if not SCAPY_AVAILABLE:
-					st.session_state.running = False
-					st.session_state.capture_error = (
-						'Live capture cannot start because Scapy is unavailable.')
-				else:
-					st.session_state.running = True
-					start_capture_thread( )
-			else:
-				stop_capture_thread( )
-				st.session_state.running = True
+	with st.expander( label='Controls', expanded=True ):
+		mode = st.radio( ' ', options=[ 'Demo / Replay', 'Live (Scapy)', ], )
+		if (mode == 'Live (Scapy)' and not SCAPY_AVAILABLE):
+			st.error( 'Scapy is not available. Install Scapy and run the application with '
+			          'administrator/root privileges.' )
 			
-			st.rerun( )
+			if SCAPY_IMPORT_ERROR:
+				st.caption( SCAPY_IMPORT_ERROR )
+		
+		st.divider( )
+		
+		c1, c2 = st.columns( 2  )
+		with c1:
+			if st.button( '▶ Start', use_container_width=True, ):
+				st.session_state.capture_error = ''
+				st.session_state.capture_mode = mode
+				if mode == 'Live (Scapy)':
+					if not SCAPY_AVAILABLE:
+						st.session_state.running = False
+						st.session_state.capture_error = (
+							'Live capture cannot start because Scapy is unavailable.')
+					else:
+						st.session_state.running = True
+						start_capture_thread( )
+				else:
+					stop_capture_thread( )
+					st.session_state.running = True
+				
+				st.rerun( )
+		
+		st.divider( )
+		
+		with c2:
+			if st.button( '■ Stop', use_container_width=True, ):
+				st.session_state.running = False
+				stop_capture_thread( )
+				st.rerun( )
+		
+		if st.session_state.running:
+			st.success( f'Capture running: {st.session_state.capture_mode}' )
+		else:
+			st.caption( 'Capture stopped.' )
+		
+		if st.session_state.capture_error:
+			st.error( st.session_state.capture_error )
 	
-	with c2:
-		if st.button( '■ Stop', use_container_width=True, ):
-			st.session_state.running = False
-			stop_capture_thread( )
-			st.rerun( )
-	
-	if st.session_state.running:
-		st.success( f'Capture running: {st.session_state.capture_mode}' )
-	else:
-		st.caption( 'Capture stopped.' )
-	
-	if st.session_state.capture_error:
-		st.error( st.session_state.capture_error )
-	
-	st.markdown( cfg.BLUE_DIVIDER, unsafe_allow_html=True, )
-	st.subheader( 'Filters' )
-	proto_filter = st.multiselect( 'Protocols', options=cfg.PROTOCOL_ORDER, default=cfg.PROTOCOL_ORDER, )
-	port_range = st.slider( 'Destination Port Range', 0, 65535, (0, 65535,), )
-	window_size = st.slider( 'Rolling Window (Packets)', 50, 2000, 500, 50, )
+	# ----------------------------------------------------
+	# Expander - Sidebar Filters
+	# ----------------------------------------------------
+	st.markdown( cfg.BLUE_DIVIDER, unsafe_allow_html=False, )
+	with st.expander( label='Filters', expanded=True ):
+		proto_filter = st.multiselect( 'Protocols', options=cfg.PROTOCOL_ORDER, default=cfg.PROTOCOL_ORDER, )
+		st.divider( )
+		port_range = st.slider( 'Destination Port Range', 0, 65535, (0, 65535,), )
+		st.divider( )
+		window_size = st.slider( 'Rolling Window (Packets)', 50, 2000, 500, 50, )
 
-# ==========================================================================================
-# PART 12 — Real-Time Summary Fragment
-# ==========================================================================================
-
+# ----- Real-Time Summary Fragment ------
 @st.fragment( run_every=REALTIME_REFRESH_INTERVAL )
 def render_realtime_summary( protocols: List[ str ], destination_ports: tuple[ int, int ],
 	packet_window_size: int, ) -> None:
@@ -1393,39 +1401,29 @@ def render_realtime_summary( protocols: List[ str ], destination_ports: tuple[ i
 	df_packets = create_packet_snapshot( st.session_state.packets, protocols, destination_ports, )
 	with st.container( ):
 		m1, m2, m3, m4, m5 = st.columns( 5 )
-		
 		packet_count = len( df_packets )
-		
 		source_count = (df_packets[ 'src_ip' ].nunique( ) if not df_packets.empty else 0)
-		
 		destination_count = (df_packets[ 'dst_ip' ].nunique( ) if not df_packets.empty else 0)
-		
 		average_packet_size = (int( df_packets[ 'length' ].mean( ) ) if not df_packets.empty
 		                       else 0)
 		
 		protocol_count = (df_packets[ 'protocol' ].nunique( ) if not df_packets.empty else 0)
-		
 		m1.metric( 'Packets', f'{packet_count:,}', )
-		
 		m2.metric( 'Unique Src IPs', f'{source_count:,}', )
-		
 		m3.metric( 'Unique Dst IPs', f'{destination_count:,}', )
-		
 		m4.metric( 'Avg Packet Size', f'{average_packet_size:,} B', )
-		
 		m5.metric( 'Protocols Seen', f'{protocol_count:,}', )
 		
 		st.markdown( cfg.BLUE_DIVIDER, unsafe_allow_html=True, )
 	
-	traffic_column, throughput_column = st.columns( 2, gap='medium', )
+	traffic_column, throughput_column = st.columns( 2, gap='medium', border=True )
 	with traffic_column:
 		if not df_packets.empty:
 			figure_traffic = create_traffic_figure( df_packets )
-			
 			st.plotly_chart( figure_traffic, use_container_width=True, config=cfg.CHART_CONFIG,
 				key='traffic-over-time-chart', )
 		else:
-			with st.container( height=cfg.SUMMARY_CHART_HEIGHT ):
+			with st.container( height=cfg.SUMMARY_CHART_HEIGHT, border=True ):
 				st.info( 'No time-series data is available.' )
 	
 	with throughput_column:
@@ -1434,20 +1432,17 @@ def render_realtime_summary( protocols: List[ str ], destination_ports: tuple[ i
 		
 		if not df_throughput_packets.empty:
 			figure_throughput = create_throughput_figure( df_packets )
-			
 			st.plotly_chart( figure_throughput, use_container_width=True, config=cfg.CHART_CONFIG,
 				key='network-throughput-chart', )
 		else:
-			with st.container( height=cfg.SUMMARY_CHART_HEIGHT ):
+			with st.container( height=cfg.SUMMARY_CHART_HEIGHT, border=True ):
 				st.info( 'No throughput data is available.' )
 	
 	st.markdown( cfg.BLUE_DIVIDER, unsafe_allow_html=True, )
 
 render_realtime_summary( proto_filter, port_range, window_size, )
 
-# ==========================================================================================
-# PART 13 — Packet Analysis Fragment
-# ==========================================================================================
+# -----  Packet Analysis Fragment  -----
 
 @st.fragment( run_every=ANALYSIS_REFRESH_INTERVAL )
 def render_packet_analysis( protocols: List[ str ], destination_ports: tuple[ int, int ], ) -> None:
@@ -1469,10 +1464,9 @@ def render_packet_analysis( protocols: List[ str ], destination_ports: tuple[ in
 	throw_if( 'destination_ports', destination_ports, )
 	df_packets = create_packet_snapshot( st.session_state.packets, protocols, destination_ports, )
 	if not df_packets.empty:
-		protocol_column, size_column = st.columns( [ 0.82, 1.38, ], gap='medium', )
+		protocol_column, size_column = st.columns( [ 0.82, 1.38, ], gap='medium', border=True )
 		with protocol_column:
 			figure_protocol = create_protocol_figure( df_packets )
-			
 			st.plotly_chart( figure_protocol, use_container_width=True, config=cfg.CHART_CONFIG,
 				key='protocol-composition-chart', )
 		
@@ -1482,7 +1476,7 @@ def render_packet_analysis( protocols: List[ str ], destination_ports: tuple[ in
 				key='packet-size-histogram', )
 		
 		st.markdown( cfg.BLUE_DIVIDER, unsafe_allow_html=True, )
-		source_column, destination_column = st.columns( 2, gap='medium', )
+		source_column, destination_column = st.columns( 2, gap='medium', border=True )
 		with source_column:
 			figure_sources = create_endpoint_figure( df_packets, 'src_ip', 'Top Source IP Addresses', )
 			st.plotly_chart( figure_sources, use_container_width=True, config=cfg.CHART_CONFIG,
@@ -1497,13 +1491,13 @@ def render_packet_analysis( protocols: List[ str ], destination_ports: tuple[ in
 		
 		st.markdown( cfg.BLUE_DIVIDER, unsafe_allow_html=True, )
 	else:
-		empty_left, empty_right = st.columns( 2 )
+		empty_left, empty_right = st.columns( 2, border=True )
 		with empty_left:
-			with st.container( height=cfg.SUMMARY_CHART_HEIGHT ):
+			with st.container( height=cfg.SUMMARY_CHART_HEIGHT, border=True ):
 				st.info( 'No protocol data is available.' )
 		
 		with empty_right:
-			with st.container( height=cfg.SUMMARY_CHART_HEIGHT ):
+			with st.container( height=cfg.SUMMARY_CHART_HEIGHT, border=True ):
 				st.info( 'No packet-size data is available.' )
 		
 		st.markdown( cfg.BLUE_DIVIDER, unsafe_allow_html=True, )
@@ -1541,16 +1535,14 @@ def render_packet_analysis( protocols: List[ str ], destination_ports: tuple[ in
 					help='Capture-session identifier.', width='medium', ), },
 			key='live-packet-editor', )
 	else:
-		with st.container( height=cfg.PACKET_EDITOR_HEIGHT ):
+		with st.container( height=cfg.PACKET_EDITOR_HEIGHT, border=True ):
 			st.info( 'Waiting for packets…' )
 	
 	st.markdown( cfg.BLUE_DIVIDER, unsafe_allow_html=True, )
 
 render_packet_analysis( proto_filter, port_range, )
 
-# ==========================================================================================
-# PART 14 — Flow Analysis Fragment
-# ==========================================================================================
+# ----- Flow Analysis Fragment -----
 
 @st.fragment( run_every=FLOW_REFRESH_INTERVAL )
 def render_flow_analysis( protocols: List[ str ], destination_ports: tuple[ int, int ], ) -> None:
@@ -1575,45 +1567,35 @@ def render_flow_analysis( protocols: List[ str ], destination_ports: tuple[ int,
 	df_packets = create_packet_snapshot( st.session_state.packets, protocols, destination_ports, )
 	if not df_packets.empty:
 		df_port_packets = df_packets.dropna( subset=[ 'dst_port', ] )
-		
 		if not df_port_packets.empty:
 			figure_ports = create_port_heatmap( df_packets )
-			
 			st.plotly_chart( figure_ports, use_container_width=True, config=cfg.CHART_CONFIG,
 				key='destination-port-heatmap', )
 		else:
-			with st.container( height=cfg.SUMMARY_CHART_HEIGHT ):
+			with st.container( height=cfg.SUMMARY_CHART_HEIGHT, border=True ):
 				st.info( 'No destination-port data is available for the current filters.' )
 	else:
-		with st.container( height=cfg.SUMMARY_CHART_HEIGHT ):
+		with st.container( height=cfg.SUMMARY_CHART_HEIGHT, border=True ):
 			st.info( 'No destination-port activity is available.' )
 	
 	st.markdown( cfg.BLUE_DIVIDER, unsafe_allow_html=True, )
 	
-	# --------------------------------------------------------------------------------------
-	# Network Flow Relationships
-	# --------------------------------------------------------------------------------------
 	if not df_packets.empty:
 		df_flow_packets = df_packets.dropna( subset=[ 'src_ip', 'dst_ip', ] )
-		
 		if not df_flow_packets.empty:
 			figure_flow = create_flow_figure( df_packets )
 			st.plotly_chart( figure_flow, use_container_width=True, config=cfg.CHART_CONFIG,
 				key='network-flow-sankey', )
 		else:
-			with st.container( height=cfg.FLOW_CHART_HEIGHT ):
+			with st.container( height=cfg.FLOW_CHART_HEIGH, border=True ):
 				st.info( 'No source-to-destination flow data is available.' )
 	else:
-		with st.container( height=cfg.FLOW_CHART_HEIGHT ):
+		with st.container( height=cfg.FLOW_CHART_HEIGHT, border=True ):
 			st.info( 'No source-to-destination flow data is available.' )
 	
 	st.markdown( cfg.BLUE_DIVIDER, unsafe_allow_html=True, )
 	
-	# --------------------------------------------------------------------------------------
-	# TCP Flag Activity and Source-Destination Traffic Matrix
-	# --------------------------------------------------------------------------------------
-	flag_column, matrix_column = st.columns( 2, gap='medium', )
-	
+	flag_column, matrix_column = st.columns( 2, gap='medium', border=True )
 	with flag_column:
 		if not df_packets.empty:
 			df_tcp_flag_packets = df_packets[
@@ -1622,107 +1604,91 @@ def render_flow_analysis( protocols: List[ str ], destination_ports: tuple[ int,
 			
 			if not df_tcp_flag_packets.empty:
 				figure_tcp_flags = create_tcp_flag_heatmap( df_packets )
-				
 				st.plotly_chart( figure_tcp_flags, use_container_width=True, config=cfg.CHART_CONFIG,
 					key='tcp-flag-activity-chart', )
 			else:
-				with st.container( height=cfg.SUMMARY_CHART_HEIGHT ):
+				with st.container( height=cfg.SUMMARY_CHART_HEIGHT, border=True ):
 					st.info( 'No TCP flag activity is available for the current filters.' )
 		else:
-			with st.container( height=cfg.SUMMARY_CHART_HEIGHT ):
+			with st.container( height=cfg.SUMMARY_CHART_HEIGHT, border=True ):
 				st.info( 'No TCP flag activity is available for the current filters.' )
 	
 	with matrix_column:
 		if not df_packets.empty:
 			df_matrix_packets = df_packets.dropna( subset=[ 'src_ip', 'dst_ip', ] )
-			
 			if not df_matrix_packets.empty:
 				figure_matrix = create_traffic_matrix_figure( df_packets )
-				
 				st.plotly_chart( figure_matrix, use_container_width=True, config=cfg.CHART_CONFIG,
 					key='source-destination-matrix-chart', )
 			else:
-				with st.container( height=cfg.SUMMARY_CHART_HEIGHT ):
+				with st.container( height=cfg.SUMMARY_CHART_HEIGHT, border=True ):
 					st.info( 'No source-to-destination matrix data is available.' )
 		else:
-			with st.container( height=cfg.SUMMARY_CHART_HEIGHT ):
+			with st.container( height=cfg.SUMMARY_CHART_HEIGHT, border=True ):
 				st.info( 'No source-to-destination matrix data is available.' )
 	
 	st.markdown( cfg.BLUE_DIVIDER, unsafe_allow_html=True, )
 	
-	# --------------------------------------------------------------------------------------
-	# Port Activity Over Time
-	# --------------------------------------------------------------------------------------
 	if not df_packets.empty:
 		df_port_trend_packets = df_packets.dropna( subset=[ 'timestamp', 'dst_port', ] )
-		
 		if not df_port_trend_packets.empty:
 			figure_port_activity = create_port_activity_figure( df_packets )
-			
 			st.plotly_chart( figure_port_activity, use_container_width=True, config=cfg.CHART_CONFIG,
 				key='port-activity-over-time-chart', )
 		else:
-			with st.container( height=cfg.SUMMARY_CHART_HEIGHT ):
+			with st.container( height=cfg.SUMMARY_CHART_HEIGHT, border=True ):
 				st.info( 'No destination-port trend data is available for the current filters.' )
 	else:
-		with st.container( height=cfg.SUMMARY_CHART_HEIGHT ):
+		with st.container( height=cfg.SUMMARY_CHART_HEIGHT, border=True ):
 			st.info( 'No destination-port trend data is available for the current filters.' )
 	
 	st.markdown( cfg.BLUE_DIVIDER, unsafe_allow_html=True, )
 	
-	fan_out_column, fan_in_column = st.columns( 2, gap='medium', )
-	
+	fan_out_column, fan_in_column = st.columns( 2, gap='medium', border=True )
 	with fan_out_column:
 		if not df_packets.empty:
 			df_fan_out_packets = df_packets.dropna( subset=[ 'src_ip', 'dst_ip', ] )
-			
 			if not df_fan_out_packets.empty:
 				figure_fan_out = create_fan_out_figure( df_packets )
-				
 				st.plotly_chart( figure_fan_out, use_container_width=True, config=cfg.CHART_CONFIG,
 					key='source-fan-out-chart', )
 			else:
-				with st.container( height=cfg.SUMMARY_CHART_HEIGHT ):
+				with st.container( height=cfg.SUMMARY_CHART_HEIGHT, border=True ):
 					st.info( 'No source fan-out data is available.' )
 		else:
-			with st.container( height=cfg.SUMMARY_CHART_HEIGHT ):
+			with st.container( height=cfg.SUMMARY_CHART_HEIG, border=True ):
 				st.info( 'No source fan-out data is available.' )
 	
 	with fan_in_column:
 		if not df_packets.empty:
 			df_fan_in_packets = df_packets.dropna( subset=[ 'src_ip', 'dst_ip', ] )
-			
 			if not df_fan_in_packets.empty:
 				figure_fan_in = create_fan_in_figure( df_packets )
-				
 				st.plotly_chart( figure_fan_in, use_container_width=True, config=cfg.CHART_CONFIG,
 					key='destination-fan-in-chart', )
 			else:
-				with st.container( height=cfg.SUMMARY_CHART_HEIGHT ):
+				with st.container( height=cfg.SUMMARY_CHART_HEIGHT, border=True ):
 					st.info( 'No destination fan-in data is available.' )
 		else:
-			with st.container( height=cfg.SUMMARY_CHART_HEIGHT ):
+			with st.container( height=cfg.SUMMARY_CHART_HEIGHT, border=True ):
 				st.info( 'No destination fan-in data is available.' )
 	
 	st.markdown( cfg.BLUE_DIVIDER, unsafe_allow_html=True, )
 	
-	# --------------------------------------------------------------------------------------
-	# Flow Duration Versus Volume
-	# --------------------------------------------------------------------------------------
+	# ----- Flow Duration Versus Volume ------
 	if not df_packets.empty:
 		df_scatter_packets = df_packets.dropna(
 			subset=[ 'timestamp', 'length', 'src_ip', 'dst_ip', 'protocol', ] )
 		
 		if not df_scatter_packets.empty:
 			figure_flow_scatter = create_flow_scatter_figure( df_packets )
-			
 			st.plotly_chart( figure_flow_scatter, use_container_width=True, config=cfg.CHART_CONFIG,
 				key='flow-duration-volume-chart', )
 		else:
-			with st.container( height=cfg.FLOW_CHART_HEIGHT ):
+			with st.container( height=cfg.FLOW_CHART_HEIGHT, border=True ):
 				st.info( 'No five-tuple flow data is available for the current filters.' )
 	else:
-		with st.container( height=cfg.FLOW_CHART_HEIGHT ):
+		with st.container( height=cfg.FLOW_CHART_HEIGHT, border=True ):
 			st.info( 'No five-tuple flow data is available for the current filters.' )
 	
 	st.markdown( cfg.BLUE_DIVIDER, unsafe_allow_html=True, )
@@ -1730,7 +1696,7 @@ def render_flow_analysis( protocols: List[ str ], destination_ports: tuple[ int,
 render_flow_analysis( proto_filter, port_range, )
 
 # ==========================================================================================
-# PART 15 — Footer
+# Footer
 # ==========================================================================================
 
 st.caption( 'Sloppy Network Analyzer — Live capture via Scapy enabled. '
