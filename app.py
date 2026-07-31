@@ -1569,6 +1569,7 @@ def render_packet_analysis( protocols: List[ str ], destination_ports: tuple[ in
 				key='top-destination-chart', )
 		
 		st.markdown( cfg.BLUE_DIVIDER, unsafe_allow_html=True, )
+		
 	else:
 		empty_left, empty_right = st.columns( 2, border=True, )
 		
@@ -1591,7 +1592,6 @@ def render_packet_analysis( protocols: List[ str ], destination_ports: tuple[ in
 	
 	if not df_packets.empty:
 		df_packet_editor = prepare_packet_editor( df_packets )
-		
 		st.data_editor( df_packet_editor, disabled=True, hide_index=True, use_container_width=True,
 			height=cfg.PACKET_EDITOR_HEIGHT,
 			column_order=[ 'timestamp', 'protocol', 'src_ip', 'src_port', 'dst_ip', 'dst_port',
