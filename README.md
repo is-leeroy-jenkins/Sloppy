@@ -11,9 +11,6 @@
 **Sloppy** is a Python-based, interactive network packet analysis application built with **Streamlit**.
 It combines **low-level protocol parsing**, **live or simulated packet capture**, and **real-time analytics** into a single, analyst-friendly interface.
 
-The application is intentionally designed to *feel sophisticated and exploratory* while remaining lightweight, transparent, and easy to extend.
-
-
 
 ## ✨ Key Capabilities
 
