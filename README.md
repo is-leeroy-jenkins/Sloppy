@@ -15,6 +15,8 @@
 
 ___
 
+[![Documentation](https://img.shields.io/badge/docs-GitHub%20Pages-0078FC?style=for-the-badge&logo=github)](https://is-leeroy-jenkins.github.io/Sloppy/)
+
 ## 📌 Overview
 
 **Sloppy** is a Streamlit-based network traffic analysis platform for packet capture, deterministic replay, protocol normalization, interactive filtering, OSI-layer analysis, adaptive visualization, and SQLite-backed exception logging.
@@ -248,7 +250,7 @@ Validation targets:
 - Historical traffic comparison
 
 ## 📜 License
+Sloppy Joe is published under the [MIT General Public License v3](https://github.com/is-leeroy-jenkins/Sloppy/blob/main/LICENSE.txt)
 
-[MIT License](https://github.com/is-leeroy-jenkins/Sloppy/blob/main/LICENSE.txt)
 
 © 2022–2026 Terry D. Eppler
