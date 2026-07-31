@@ -1318,7 +1318,7 @@ with st.sidebar:
 	# Expander - Sidebar Controls
 	# ----------------------------------------------------
 	st.markdown( cfg.BLUE_DIVIDER, unsafe_allow_html=True, )
-	with st.expander( label='Controls', expanded=True ):
+	with st.expander( label='Controls', expanded=False ):
 		mode = st.radio( ' ', options=[ 'Demo / Replay', 'Live (Scapy)', ], )
 		if (mode == 'Live (Scapy)' and not SCAPY_AVAILABLE):
 			st.error( 'Scapy is not available. Install Scapy and run the application with '
@@ -1367,8 +1367,8 @@ with st.sidebar:
 	# ----------------------------------------------------
 	# Expander - Sidebar Filters
 	# ----------------------------------------------------
-	st.markdown( cfg.BLUE_DIVIDER, unsafe_allow_html=False, )
-	with st.expander( label='Filters', expanded=True ):
+	st.markdown( cfg.BLUE_DIVIDER, unsafe_allow_html=True, )
+	with st.expander( label='Filters', expanded=False ):
 		proto_filter = st.multiselect( 'Protocols', options=cfg.PROTOCOL_ORDER, default=cfg.PROTOCOL_ORDER, )
 		st.divider( )
 		port_range = st.slider( 'Destination Port Range', 0, 65535, (0, 65535,), )
