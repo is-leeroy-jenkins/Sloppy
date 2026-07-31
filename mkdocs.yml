@@ -1,10 +1,29 @@
 site_name: Sloppy Network Analyzer
 site_description: Technical, operational, and API documentation for the Sloppy Streamlit network-analysis application.
 site_author: Terry D. Eppler
+site_url: https://is-leeroy-jenkins.github.io/Sloppy/
+
+repo_name: is-leeroy-jenkins/Sloppy
+repo_url: https://github.com/is-leeroy-jenkins/Sloppy
+edit_uri: edit/main/docs/
+
+copyright: Copyright &copy; Terry D. Eppler
+
+strict: true
+use_directory_urls: true
 
 theme:
   name: material
   language: en
+
+  logo: material/access-point-network
+
+  icon:
+    logo: material/access-point-network
+    repo: fontawesome/brands/github
+    edit: material/file-edit-outline
+    view: material/file-eye-outline
+
   features:
     - navigation.instant
     - navigation.instant.progress
@@ -14,12 +33,16 @@ theme:
     - navigation.expand
     - navigation.indexes
     - navigation.top
+    - navigation.tracking
     - toc.follow
     - search.suggest
     - search.highlight
     - search.share
+    - content.action.edit
+    - content.action.view
     - content.code.copy
     - content.code.annotate
+
   palette:
     - media: "(prefers-color-scheme: dark)"
       scheme: slate
@@ -28,6 +51,7 @@ theme:
       toggle:
         icon: material/weather-sunny
         name: Switch to light mode
+
     - media: "(prefers-color-scheme: light)"
       scheme: default
       primary: black
@@ -35,15 +59,16 @@ theme:
       toggle:
         icon: material/weather-night
         name: Switch to dark mode
-  icon:
-    logo: material/access-point-network
-    repo: fontawesome/brands/github
 
 nav:
   - Home: index.md
+
   - Architecture: architecture.md
+
   - OSI Coverage: osi-layers.md
+
   - Workflows: workflows.md
+
   - User Guide:
       - Overview: user-guide/index.md
       - Application Overview: user-guide/overview.md
@@ -54,24 +79,31 @@ nav:
       - Filters: user-guide/filters.md
       - Visualization: user-guide/visualization.md
       - Troubleshooting: user-guide/troubleshooting.md
+
   - Logging: logging.md
+
   - Configuration: configuration.md
+
   - API Reference:
       - Overview: api/index.md
       - Application: api/app.md
       - Logging: api/boogr.md
       - Configuration: api/config.md
+
   - Development: development.md
 
 plugins:
   - search:
       lang: en
-      separator: '[\\s\\-\\.]+'
+      separator: '[\s\-\.]+'
+
   - autorefs
+
   - mkdocstrings:
       handlers:
         python:
-          paths: [ . ]
+          paths:
+            - .
           options:
             docstring_style: google
             show_source: false
@@ -92,25 +124,38 @@ markdown_extensions:
   - footnotes
   - md_in_html
   - tables
+
   - toc:
       permalink: true
       toc_depth: 3
+
   - pymdownx.details
+
   - pymdownx.highlight:
       anchor_linenums: true
       line_spans: __span
       pygments_lang_class: true
+
   - pymdownx.inlinehilite
   - pymdownx.keys
   - pymdownx.snippets
   - pymdownx.superfences
+
   - pymdownx.tabbed:
       alternate_style: true
+
   - pymdownx.tasklist:
       custom_checkbox: true
+
   - pymdownx.emoji:
       emoji_index: !!python/name:material.extensions.emoji.twemoji
       emoji_generator: !!python/name:material.extensions.emoji.to_svg
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/is-leeroy-jenkins/Sloppy
+      name: Sloppy on GitHub
 
 extra_css:
   - stylesheets/extra.css
