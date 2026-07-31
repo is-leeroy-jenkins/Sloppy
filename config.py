@@ -6,7 +6,7 @@
       Created:                 05-31-2022
 
       Last Modified By:        Terry D. Eppler
-      Last Modified On:        05-01-2025
+      Last Modified On:        07-30-2026
   ******************************************************************************************
   <copyright file="config.py" company="Terry D. Eppler">
 
@@ -41,8 +41,13 @@
   </summary>
   ******************************************************************************************
 '''
+
 # ----- Constants ------
-BLUE_DIVIDER = "<div style='height:2px;align:left;background:#0078FC;margin:30px 0px 30px 0px;'></div>"
+BLUE_DIVIDER = (
+	"<div style='height:2px;align:left;background:#0078FC;"
+	"margin:30px 0px 30px 0px;'></div>"
+)
+
 ICON = r'resources/images/favicon.ico'
 LOGO = r'resources/images/Sloppy.png'
 DB = r'stores/sqlite/sloppy.db'
@@ -64,9 +69,37 @@ BORDER_COLOR = 'rgba( 148, 163, 184, 0.32 )'
 TEXT_COLOR = '#F8FAFC'
 MUTED_TEXT_COLOR = '#94A3B8'
 
+# ----- Analysis Modes ------
+ANALYSIS_MODE_NETWORK = 'Network Analysis'
+ANALYSIS_MODE_DATA_LINK = 'Data Link Analysis'
+ANALYSIS_MODE_NETWORK_LAYER = 'Network Layer Analysis'
+ANALYSIS_MODE_TRANSPORT = 'Transport Analysis'
+ANALYSIS_MODE_SESSION = 'Session Analysis'
+ANALYSIS_MODE_PRESENTATION = 'Presentation Analysis'
+ANALYSIS_MODE_APPLICATION = 'Application Analysis'
+
+ANALYSIS_MODES = [
+	ANALYSIS_MODE_NETWORK,
+	ANALYSIS_MODE_DATA_LINK,
+	ANALYSIS_MODE_NETWORK_LAYER,
+	ANALYSIS_MODE_TRANSPORT,
+	ANALYSIS_MODE_SESSION,
+	ANALYSIS_MODE_PRESENTATION,
+	ANALYSIS_MODE_APPLICATION,
+]
+
 # ----- Protocol ------
-PROTOCOL_ORDER = [ 'TCP', 'UDP', 'ICMP', ]
-PROTOCOL_COLORS = { 'TCP': ACCENT_BLUE, 'UDP': GREEN, 'ICMP': AMBER, }
+PROTOCOL_ORDER = [
+	'TCP',
+	'UDP',
+	'ICMP',
+]
+
+PROTOCOL_COLORS = {
+	'TCP': ACCENT_BLUE,
+	'UDP': GREEN,
+	'ICMP': AMBER,
+}
 
 # ----- Chart & Visualization -----
 SUMMARY_CHART_HEIGHT = 390
@@ -74,12 +107,33 @@ FLOW_CHART_HEIGHT = 510
 PACKET_EDITOR_HEIGHT = 460
 PACKET_EDITOR_ROW_LIMIT = 250
 TRAFFIC_WINDOW_SECONDS = 60
-CHART_CONFIG = { 'displaylogo': False, 'responsive': True, 'scrollZoom': False,
-	'modeBarButtonsToRemove': [ 'lasso2d', 'select2d', ], }
 
-TCP_FLAG_ORDER = [ 'SYN', 'ACK', 'PSH', 'FIN', 'RST', 'URG', ]
+CHART_CONFIG = {
+	'displaylogo': False,
+	'responsive': True,
+	'scrollZoom': False,
+	'modeBarButtonsToRemove': [
+		'lasso2d',
+		'select2d',
+	],
+}
 
-FLOW_COLUMNS = [ 'src_ip', 'src_port', 'dst_ip', 'dst_port', 'protocol', ]
+TCP_FLAG_ORDER = [
+	'SYN',
+	'ACK',
+	'PSH',
+	'FIN',
+	'RST',
+	'URG',
+]
+
+FLOW_COLUMNS = [
+	'src_ip',
+	'src_port',
+	'dst_ip',
+	'dst_port',
+	'protocol',
+]
 
 TOP_FLAG_PORT_LIMIT = 10
 TOP_MATRIX_SOURCE_LIMIT = 15
