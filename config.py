@@ -66,7 +66,7 @@ def throw_if( name: str, value: object ) -> None:
 	"""
 	if not value:
 		raise ValueError( f'Argument "{name}" cannot be empty!' )
-	
+
 def get_bool( name: str, default: bool = False ) -> bool:
 	"""Read a Boolean environment variable using Sloppy's true-value convention.
 
@@ -85,13 +85,8 @@ def get_bool( name: str, default: bool = False ) -> bool:
 	try:
 		throw_if( 'name', name )
 		value = os.getenv( name )
-		return default if value is None else value.strip( ).lower( ) in (
-				'1',
-				'true',
-				'yes',
-				'y',
-				'on'
-		)
+		return default if value is None else value.strip( ).lower( ) in ('1', 'true', 'yes', 'y',
+			'on')
 	except Exception:
 		return default
 
@@ -182,9 +177,7 @@ def get_text( name: str, default: str ) -> str:
 		return default
 
 # ----- Constants ------
-BLUE_DIVIDER = ("<div style='height:2px;align:left;background:#0078FC;"
-                "margin:30px 0px 30px 0px;'></div>")
-
+BLUE_DIVIDER = "<div style='height:2px;align:left;background:#0078FC;margin:30px 0px 30px 0px;'></div>"
 ICON = r'resources/images/favicon.ico'
 LOGO = r'resources/images/Sloppy.png'
 DB = r'stores/sqlite/sloppy.db'
@@ -221,14 +214,12 @@ ANALYSIS_MODE_TRANSPORT = 'Transport Analysis'
 ANALYSIS_MODE_SESSION = 'Session Analysis'
 ANALYSIS_MODE_PRESENTATION = 'Presentation Analysis'
 ANALYSIS_MODE_APPLICATION = 'Application Analysis'
-
 ANALYSIS_MODES = [ ANALYSIS_MODE_NETWORK, ANALYSIS_MODE_DATA_LINK, ANALYSIS_MODE_NETWORK_LAYER,
 	ANALYSIS_MODE_TRANSPORT, ANALYSIS_MODE_SESSION, ANALYSIS_MODE_PRESENTATION,
 	ANALYSIS_MODE_APPLICATION, ]
 
 # ----- Protocol ------
 PROTOCOL_ORDER = [ 'TCP', 'UDP', 'ICMP', 'ICMPv6', ]
-
 PROTOCOL_COLORS = { 'TCP': ACCENT_BLUE, 'UDP': GREEN, 'ICMP': AMBER, 'ICMPv6': PURPLE, }
 
 # ----- Data Link Analysis ------
@@ -237,7 +228,6 @@ ETHER_TYPE_ARP = 'ARP'
 ETHER_TYPE_VLAN = '802.1Q VLAN'
 ETHER_TYPE_IPV6 = 'IPv6'
 ETHER_TYPE_OTHER = 'Other'
-
 ETHER_TYPE_ORDER = [ ETHER_TYPE_IPV4, ETHER_TYPE_ARP, ETHER_TYPE_VLAN, ETHER_TYPE_IPV6,
 	ETHER_TYPE_OTHER, ]
 
@@ -250,23 +240,18 @@ ETHER_TYPE_NAMES = { 0x0800: ETHER_TYPE_IPV4, 0x0806: ETHER_TYPE_ARP, 0x8100: ET
 ARP_OPERATION_REQUEST = 'Request'
 ARP_OPERATION_REPLY = 'Reply'
 ARP_OPERATION_OTHER = 'Other'
-
 ARP_OPERATION_ORDER = [ ARP_OPERATION_REQUEST, ARP_OPERATION_REPLY, ARP_OPERATION_OTHER, ]
-
 ARP_OPERATION_COLORS = { ARP_OPERATION_REQUEST: ACCENT_BLUE, ARP_OPERATION_REPLY: GREEN,
 	ARP_OPERATION_OTHER: MUTED_TEXT_COLOR, }
 
 FRAME_CLASS_UNICAST = 'Unicast'
 FRAME_CLASS_MULTICAST = 'Multicast'
 FRAME_CLASS_BROADCAST = 'Broadcast'
-
 FRAME_CLASS_ORDER = [ FRAME_CLASS_UNICAST, FRAME_CLASS_MULTICAST, FRAME_CLASS_BROADCAST, ]
-
 FRAME_CLASS_COLORS = { FRAME_CLASS_UNICAST: ACCENT_BLUE, FRAME_CLASS_MULTICAST: PURPLE,
 	FRAME_CLASS_BROADCAST: AMBER, }
 
 BROADCAST_MAC_ADDRESS = 'ff:ff:ff:ff:ff:ff'
-
 TOP_MAC_ADDRESS_LIMIT = 10
 TOP_MAC_IP_RELATIONSHIP_LIMIT = 20
 TOP_ARP_RELATIONSHIP_LIMIT = 20
@@ -279,14 +264,11 @@ FLOW_CHART_HEIGHT = 510
 PACKET_EDITOR_HEIGHT = 460
 PACKET_EDITOR_ROW_LIMIT = 250
 TRAFFIC_WINDOW_SECONDS = 60
-
 CHART_CONFIG = { 'displaylogo': False, 'responsive': True, 'scrollZoom': False,
 	'modeBarButtonsToRemove': [ 'lasso2d', 'select2d', ], }
 
 TCP_FLAG_ORDER = [ 'SYN', 'ACK', 'PSH', 'FIN', 'RST', 'URG', ]
-
 FLOW_COLUMNS = [ 'src_ip', 'src_port', 'dst_ip', 'dst_port', 'protocol', ]
-
 TOP_FLAG_PORT_LIMIT = 10
 TOP_MATRIX_SOURCE_LIMIT = 15
 TOP_MATRIX_DESTINATION_LIMIT = 15
@@ -323,3 +305,18 @@ TLS_CIPHER_NAMES = { 0x1301: 'TLS_AES_128_GCM_SHA256', 0x1302: 'TLS_AES_256_GCM_
 TOP_SUBNET_RELATIONSHIP_LIMIT = 20
 TOP_SESSION_LIMIT = 20
 SESSION_IDLE_SECONDS = 30
+
+# ----- Sparse Visualization Policy -----
+CATEGORY_CHART_MINIMUM_VALUES = 2
+CATEGORY_EDITOR_HEIGHT = 220
+CATEGORY_EDITOR_ROW_LIMIT = 15
+CATEGORY_UNKNOWN_LABEL = 'Unknown'
+CATEGORY_EDITOR_CAPTION = ('A table is shown until at least two distinct categories are available.')
+
+# ----- Exception Logging -----
+ENABLE_EXCEPTION_LOGGING = True
+LOG_RETENTION_DAYS = 7
+MAX_LOG_MESSAGE_CHARS = 1000
+MAX_LOG_TRACE_CHARS = 4000
+ENABLE_FILE_PATH_LOGGING = False
+ENABLE_RAW_TEXT_LOGGING = False
