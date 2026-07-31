@@ -23,6 +23,8 @@ ___
 
 The application supports live traffic acquisition through Scapy and a privilege-free demo/replay path for development, testing, and demonstrations.
 
+## 🎥 Demo
+
 ![](https://github.com/is-leeroy-jenkins/Sloppy/blob/main/resources/images/sloppy-demo.gif)
 
 ## ✨ Capabilities
