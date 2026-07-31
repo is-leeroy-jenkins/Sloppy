@@ -1,203 +1,254 @@
 ###### Sloppy
 
-![](https://github.com/is-leeroy-jenkins/Sloppy/blob/main/resources/images/sloppy_project.png)
+![Sloppy Network Analyzer](resources/images/sloppy_project.png)
 
+<p align="center">
+  <a href="#-overview">Overview</a> •
+  <a href="#-capabilities">Capabilities</a> •
+  <a href="#-osi-layer-analysis">OSI Layers</a> •
+  <a href="#-architecture">Architecture</a> •
+  <a href="#-installation">Installation</a> •
+  <a href="#-running-sloppy">Run</a> •
+  <a href="https://is-leeroy-jenkins.github.io/Sloppy/">Documentation</a> •
+  <a href="#-license">License</a>
+</p>
 
+___
 
 ## 📌 Overview
 
-**Sloppy** is a Python-based, interactive network packet analysis application built with **Streamlit**.
-It combines **low-level protocol parsing**, **live or simulated packet capture**, and **real-time analytics** into a single, analyst-friendly interface.
+**Sloppy** is a Streamlit-based network traffic analysis platform for packet capture, deterministic replay, protocol normalization, interactive filtering, OSI-layer analysis, adaptive visualization, and SQLite-backed exception logging.
 
+The application supports live traffic acquisition through Scapy and a privilege-free demo/replay path for development, testing, and demonstrations.
 
-## ✨ Key Capabilities
+![](https://github.com/is-leeroy-jenkins/Sloppy/blob/main/resources/images/sloppy-demo.gif)
 
-* 🧪 **Demo / Replay Mode** — deterministic synthetic traffic for testing and demos
-* 🛰️ **Live Packet Capture** — real-time sniffing via Scapy (privilege-aware)
-* 🔍 **Manual Protocol Parsing** — Ethernet, IPv4, TCP, UDP, ICMP (no black boxes)
-* 🧵 **Thread-Safe Ingestion** — background capture with queue-based buffering
-* 🪟 **Rolling Session Window** — bounded memory, continuous updates
-* 🎛️ **Interactive Filtering** — protocol, port range, packet window
-* 📊 **Real-Time Analytics** — metrics, distributions, and time series
-* 📋 **Live Packet Stream** — sortable, scrollable metadata table
+## ✨ Capabilities
 
+- 🧪 **Demo / Replay Capture** — deterministic synthetic traffic without administrative privileges
+- 🛰️ **Live Packet Capture** — background Scapy capture with privilege-aware startup behavior
+- 🧵 **Thread-Safe Ingestion** — bounded packet and error queues with non-blocking Streamlit updates
+- 🪟 **Rolling Session Window** — configurable packet retention for bounded memory use
+- 🔍 **Protocol Normalization** — Ethernet, VLAN, ARP, IPv4, IPv6, TCP, UDP, ICMP, ICMPv6, TLS, HTTP, DNS, DHCP, and NTP metadata
+- 🎛️ **Interactive Filtering** — protocol, endpoint, port, frame, network, transport, session, TLS, DNS, application, and time-window filters
+- 🧭 **Seven Analysis Modes** — Network, Data Link, Network Layer, Transport, Session, Presentation, and Application
+- 📊 **Adaptive Visualization** — informational state for zero categories, read-only table for one category, and Plotly chart for two or more categories
+- 📋 **Interactive Data Views** — sortable metrics, charts, matrices, timelines, relationships, and packet metadata tables
+- 🧾 **Structured Exception Logging** — sanitized errors persisted through `boogr.py` to `logging/Exceptions.db`
+- 📚 **MkDocs Documentation** — Material-based documentation with search, API references, architecture diagrams, workflows, and OSI coverage
 
+## 🧭 OSI-Layer Analysis
 
-## 🧱 Architecture at a Glance
+| OSI layer | Sloppy mode | Primary analysis |
+|---|---|---|
+| Layer 7 — Application | Application Analysis | DNS, HTTP, DHCP, NTP, methods, status codes, message types, and application activity |
+| Layer 6 — Presentation | Presentation Analysis | TLS versions, handshake metadata, SNI, ALPN, cipher suites, and certificate metadata when available |
+| Layer 5 — Session | Session Analysis | Bidirectional conversations, directional packet and byte counts, duration, lifecycle, and activity state |
+| Layer 4 — Transport | Transport Analysis | TCP, UDP, ICMP, ports, flags, windows, retransmission indicators, and transport distributions |
+| Layer 3 — Network | Network Layer Analysis | IPv4, IPv6, TTL, hop limit, fragmentation, DSCP, ECN, ICMP, address scope, and subnets |
+| Layer 2 — Data Link | Data Link Analysis | Ethernet, MAC addresses, ARP, VLAN, EtherType, broadcast, multicast, and frame classification |
+| Layer 1 — Physical | Indirect support | Packet size and capture timing only; no signal, radio, or physical-link telemetry |
 
+## 🧱 Architecture
+
+```text
+┌──────────────────────────────┐
+│ Capture Sources              │
+│ Demo / Replay • Live Scapy   │
+└──────────────┬───────────────┘
+               │ raw packets
+┌──────────────▼───────────────┐
+│ Capture & Ingestion          │
+│ Thread • Packet Queue        │
+│ Error Queue • Drain Pipeline │
+└──────────────┬───────────────┘
+               │ normalized records
+┌──────────────▼───────────────┐
+│ Protocol Parsing             │
+│ L2 • L3 • L4 • L5 • L6 • L7 │
+└──────────────┬───────────────┘
+               │ session state
+┌──────────────▼───────────────┐
+│ Analytics & Visualization    │
+│ Metrics • Charts • Tables    │
+│ Adaptive Sparse Rendering    │
+└──────────────┬───────────────┘
+               │
+┌──────────────▼───────────────┐
+│ Streamlit Dashboard          │
+└──────────────────────────────┘
+
+Exceptions from capture, parsing, state, and rendering flow through
+boogr.py into logging/Exceptions.db.
 ```
-┌────────────────────┐
-│  🧪 Demo Generator  │
-│  🛰️ Scapy Capture   │
-└─────────┬──────────┘
-          │ raw bytes
-┌─────────▼──────────┐
-│ 🔍 Protocol Parsers │
-│ Ethernet / IPv4     │
-│ TCP / UDP / ICMP    │
-└─────────┬──────────┘
-          │ normalized records
-┌─────────▼──────────┐
-│ 🧵 Session State    │
-│ Queue + Windowing   │
-└─────────┬──────────┘
-          │ DataFrame
-┌─────────▼──────────┐
-│ 📊 Analytics & UI   │
-│ Metrics • Charts    │
-└────────────────────┘
-```
 
-
+Detailed diagrams are available in the [MkDocs documentation](https://is-leeroy-jenkins.github.io/Sloppy/).
 
 ## 📁 Project Structure
 
+```text
+Sloppy/
+├── app.py                         # Streamlit UI, capture orchestration, analysis, and rendering
+├── boogr.py                       # Structured exception wrapping and SQLite logging
+├── config.py                      # UI, protocol, chart, filtering, and logging configuration
+├── requirements.txt               # Runtime dependencies
+├── mkdocs.yml                     # MkDocs Material configuration
+├── docs/                          # Technical and API documentation
+│   ├── api/
+│   ├── images/
+│   ├── stylesheets/
+│   └── user-guide/
+├── logging/
+│   └── Exceptions.db              # Local exception database
+├── resources/
+│   └── images/
+└── README.md
 ```
-sloppy/
-├── 🧠 __init__.py        # Core protocol parsing library
-├── 🖥️ app.py            # Streamlit application orchestrator
-├── ⚙️ config.py         # UI assets and configuration
-├── 📦 requirements.txt  # Python dependencies
-└── 📘 README.md         # Documentation
-```
 
+## 🖥️ Application Modes
 
+### 🧪 Demo / Replay
 
-## 🧠 Core Parsing Engine (`__init__.py`)
+- Generates deterministic traffic for development and demonstrations
+- Requires no elevated privileges
+- Exercises ingestion, normalization, filtering, analysis, visualization, and logging
 
-Sloppy includes a **manual protocol decoding layer**, implemented directly against raw bytes.
+### 🛰️ Live Capture
 
-### Supported Protocols
-
-* 🧬 **Ethernet** — MAC addresses, EtherType
-* 🌐 **IPv4** — TTL, protocol, source/destination IP
-* 🔁 **TCP** — ports, flags, sequence data
-* 📡 **UDP** — ports and payload
-* 📣 **ICMP** — type and code
-* 🌍 **HTTP** — best-effort UTF-8 payload decoding
-
-### Why This Matters
-
-* No reliance on Scapy for parsing logic
-* Deterministic and testable behavior
-* Reusable outside Streamlit
-* Ideal for education, research, and controlled analysis
-
-
-
-## 🖥️ Streamlit Application (`app.py`)
-
-The Streamlit layer provides **orchestration, analytics, and visualization**, not parsing.
-
-### Capture Modes
-
-#### 🧪 Demo / Replay
-
-* Generates realistic synthetic packets
-* No admin privileges required
-* Exercises the full analytics pipeline
-
-#### 🛰️ Live (Scapy)
-
-* Captures real network traffic
-* Runs in a background daemon thread
-* Gracefully disabled if Scapy or privileges are missing
-
-
+- Captures traffic through Scapy
+- Runs in a background daemon thread
+- Uses bounded queues to isolate capture from Streamlit reruns
+- Reports capture failures through the sidebar and structured exception log
+- Requires administrator or root privileges on most systems
 
 ## 🎛️ User Interface
 
-### Sidebar Controls
+### Sidebar
 
-* ▶️ Start / ■ Stop capture
-* 🔄 Capture mode selection
-* 🎚️ Protocol filters
-* 🔢 Destination port range
-* 🪟 Rolling packet window size
+- Capture mode selection
+- Start and stop controls
+- Analysis mode selection
+- Mode-specific filters
+- Packet-window configuration
+- Capture status and error reporting
 
-### Main Panel
+### Main Workspace
 
-* 📈 Executive metrics
-* 📊 Protocol distribution
-* ⏱️ Traffic over time (windowed)
-* 📋 Live packet stream table
+- Mode-specific title and OSI scope
+- Executive metrics
+- Ranked categorical analysis
+- Timelines and distributions
+- Relationship matrices and flow views
+- Read-only sparse-category editors
+- Filtered packet metadata tables
 
+## 📊 Adaptive Visualization
 
+Categorical visualizations use a shared rendering policy:
 
-## 📊 Analytics & Visualizations
+| Distinct categories | Rendered output |
+|---:|---|
+| 0 | Informational empty state |
+| 1 | Read-only `st.data_editor` summary |
+| 2 or more | Plotly visualization |
 
-* **📈 Executive Metrics**
+Horizontal ranked charts use a linear count axis and categorical labels. Plot titles are rendered once through Streamlit section headings to prevent duplicate or undefined titles.
 
-  * Total packets
-  * Unique source IPs
-  * Unique destination IPs
-  * Average packet size
-  * Protocol diversity
+## 🧾 Logging
 
-* **📊 Protocol Distribution**
+Application exceptions use the established structured pattern:
 
-  * Categorical breakdown of observed traffic
+```python
+except Error:
+    raise
+except Exception as e:
+    exception = Error( e )
+    exception.module = 'app'
+    exception.cause = '<component>'
+    exception.method = '<method signature>'
+    Logger( ).write( exception )
+    raise exception
+```
 
-* **⏱️ Traffic Over Time**
-
-  * Packets per second
-  * Safely windowed to prevent memory blowups
-
-* **📋 Live Packet Stream**
-
-  * Timestamp-sorted metadata view
-  * Scrollable and filter-aware
-
-
-
-## 🧵 Concurrency & Safety
-
-* Background capture runs in a **daemon thread**
-* UI never blocks on network I/O
-* Packet ingestion uses a bounded queue
-* Rolling window enforces memory limits
-* Streamlit rerun model respected at all times
-
-
+`boogr.py` sanitizes diagnostic content, initializes the SQLite schema, writes structured records, and purges expired logs according to the configured retention period.
 
 ## 📦 Installation
 
-```bash
+### Windows PowerShell
+
+```powershell
 python -m venv .venv
-source .venv/bin/activate      # Windows: .venv\Scripts\activate
+.\.venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip
 pip install -r requirements.txt
-pip install streamlit scapy
 ```
 
+### Linux or macOS
 
+```bash
+python -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
+pip install -r requirements.txt
+```
 
 ## ▶️ Running Sloppy
 
-```bash
+```powershell
 streamlit run app.py
 ```
 
-> ⚠️ **Live capture requires administrator/root privileges.**
-> Demo mode works without elevation.
+Live capture generally requires an elevated terminal. Demo / Replay mode does not require elevation.
 
+## 📚 Documentation
 
+Build the documentation:
 
+```powershell
+Remove-Item -Recurse -Force .\site -ErrorAction SilentlyContinue
+mkdocs build --strict
+```
 
+Run the local documentation server:
 
-## 🧭 Natural Extension Points
+```powershell
+mkdocs serve
+```
 
-* 📂 PCAP import/export
-* 🔗 Flow reconstruction (5-tuple)
-* 🚨 Anomaly & threat scoring
-* 💾 Persistent session storage
-* 📡 Protocol-specific dashboards
-* 📤 Report export (CSV / Markdown)
+Documentation URL:
 
+- [Sloppy Network Analyzer Documentation](https://is-leeroy-jenkins.github.io/Sloppy/)
+- [Source Repository](https://github.com/is-leeroy-jenkins/Sloppy)
 
+## 🧪 Validation
 
-## 📜 License 
+```powershell
+python -m py_compile app.py boogr.py config.py
+mkdocs build --strict
+```
+
+Validation targets:
+
+- Python compilation succeeds
+- MkDocs strict build completes without warnings
+- Search returns results across documentation pages
+- Architecture, workflow, and OSI diagrams render
+- API reference pages collect documented Python members
+- Repository, edit, and view links resolve to the `main` branch
+
+## 🧭 Extension Points
+
+- PCAP import and export
+- Five-tuple flow reconstruction
+- Anomaly and threat scoring
+- Persistent analysis sessions
+- Protocol-specific reports
+- CSV and Markdown exports
+- Queue-based distributed capture
+- Historical traffic comparison
+
+## 📜 License
 
 [MIT License](https://github.com/is-leeroy-jenkins/Sloppy/blob/main/LICENSE.txt)
-© 2022–2025 Terry D. Eppler
 
-
+© 2022–2026 Terry D. Eppler
