@@ -1760,21 +1760,23 @@ def configure_figure( figure: go.Figure, height: int, show_legend: bool = True, 
 		
 		throw_if( 'height', height, )
 		
-		title_text = figure.layout.title.text if figure.layout.title else None
-		title_layout = None
-		if title_text:
-			title_layout = { 'text': title_text, 'font': { 'color': cfg.TEXT_COLOR, 'size': 16, },
-				'x': 0.02, 'xanchor': 'left', }
-		
-		figure.update_layout( height=height, margin={ 'l': 18, 'r': 18, 't': 52, 'b': 24, },
-			paper_bgcolor=cfg.PANEL_BACKGROUND, plot_bgcolor=cfg.PANEL_BACKGROUND,
-			font={ 'color': cfg.TEXT_COLOR, 'family': 'Arial, sans-serif', 'size': 12, },
-			title=title_layout, hoverlabel={ 'bgcolor': '#252525', 'bordercolor': cfg.BORDER_COLOR,
+		title_text = figure.layout.title.text if figure.layout.title else ''
+		title_text = title_text.strip( ) if isinstance( title_text, str ) else ''
+		top_margin = 52 if title_text else 24
+		layout = { 'height': height, 'margin': { 'l': 18, 'r': 18, 't': top_margin, 'b': 42, },
+			'paper_bgcolor': cfg.PANEL_BACKGROUND, 'plot_bgcolor': cfg.PANEL_BACKGROUND,
+			'font': { 'color': cfg.TEXT_COLOR, 'family': 'Arial, sans-serif', 'size': 12, },
+			'hoverlabel': { 'bgcolor': '#252525', 'bordercolor': cfg.BORDER_COLOR,
 				'font': { 'color': cfg.TEXT_COLOR, }, },
-			legend={ 'orientation': 'h', 'yanchor': 'bottom', 'y': 1.02, 'xanchor': 'right',
-				'x': 1,
-				'bgcolor': 'rgba( 0, 0, 0, 0 )', }, showlegend=show_legend,
-			transition={ 'duration': 0, }, )
+			'legend': { 'orientation': 'h', 'yanchor': 'bottom', 'y': 1.02, 'xanchor': 'right',
+				'x': 1, 'bgcolor': 'rgba( 0, 0, 0, 0 )', }, 'showlegend': show_legend,
+			'transition': { 'duration': 0, }, }
+		if title_text:
+			layout[ 'title' ] = { 'text': title_text,
+				'font': { 'color': cfg.TEXT_COLOR, 'size': 16, }, 'x': 0.02, 'xanchor': 'left', }
+		else:
+			figure.update_layout( title_text='', )
+		figure.update_layout( **layout )
 		
 		figure.update_xaxes( showgrid=True, gridcolor=cfg.GRID_COLOR, zeroline=False,
 			linecolor=cfg.BORDER_COLOR, tickfont={ 'color': cfg.MUTED_TEXT_COLOR, },
@@ -2028,7 +2030,7 @@ def create_endpoint_figure( df_packets: pd.DataFrame, column_name: str, title: s
 				               'Packets: %{x:,}'
 				               '<extra></extra>'), ) ] )
 		
-		figure.update_layout( title=None, xaxis_title='Packet Count', yaxis_title='',
+		figure.update_layout( title_text='', xaxis_title='Packet Count', yaxis_title='',
 			uirevision=title, )
 		
 		figure.update_xaxes( range=[ 0, maximum_packets * 1.18, ], )
@@ -2468,7 +2470,7 @@ def create_fan_out_figure( df_packets: pd.DataFrame, ) -> go.Figure:
 		figure.update_layout( title='Source Fan-Out', xaxis_title='Unique Destination IPs',
 			yaxis_title='Source IP', uirevision='source-fan-out', )
 		
-		figure.update_xaxes( range=[ 0, maximum_value * 1.18, ], dtick=1, )
+		figure.update_xaxes( range=[ 0, maximum_value * 1.18, ], tickformat=',d', )
 		figure.update_yaxes( categoryorder='array',
 			categoryarray=df_fan_out[ 'src_ip' ].tolist( ), )
 		return configure_figure( figure, cfg.SUMMARY_CHART_HEIGHT, False, )
@@ -2518,7 +2520,7 @@ def create_fan_in_figure( df_packets: pd.DataFrame, ) -> go.Figure:
 		figure.update_layout( title='Destination Fan-In', xaxis_title='Unique Source IPs',
 			yaxis_title='Destination IP', uirevision='destination-fan-in', )
 		
-		figure.update_xaxes( range=[ 0, maximum_value * 1.18, ], dtick=1, )
+		figure.update_xaxes( range=[ 0, maximum_value * 1.18, ], tickformat=',d', )
 		figure.update_yaxes( categoryorder='array', categoryarray=df_fan_in[ 'dst_ip' ].tolist(
 		
 		), )
@@ -3882,13 +3884,13 @@ def render_category_analysis( df_packets: pd.DataFrame, column_name: str, title:
 				go.Bar( x=df_chart[ count_label ], y=df_chart[ column_name ], orientation='h',
 					name='', showlegend=False, marker={ 'color': cfg.ACCENT_BLUE, },
 					text=df_chart[ count_label ], textposition='outside', cliponaxis=False, ) )
-		figure.update_layout( title=None, showlegend=False,
+		figure.update_layout( title_text='', showlegend=False,
 			xaxis_title=count_label if chart_style == 'horizontal' else '',
 			yaxis_title='' if chart_style == 'horizontal' else count_label, uirevision=key, )
 		if chart_style == 'horizontal':
 			maximum_count = max( int( df_summary[ count_label ].max( ) ), 1, )
-			figure.update_xaxes( type='linear', dtick=1, range=[ 0, maximum_count * 1.18, ],
-				automargin=True, )
+			figure.update_xaxes( type='linear', range=[ 0, maximum_count * 1.18, ],
+				rangemode='tozero', tickformat=',d', automargin=True, )
 			figure.update_yaxes( type='category', categoryorder='array',
 				categoryarray=category_order, automargin=True, )
 		else:
@@ -3945,7 +3947,7 @@ def render_numeric_analysis( df_packets: pd.DataFrame, column_name: str, title: 
 			return
 		st.markdown( f'<div class="sloppy-section-title">{title}</div>', unsafe_allow_html=True, )
 		figure = create_numeric_histogram( df_values, column_name, title, )
-		figure.update_layout( title=None, )
+		figure.update_layout( title_text='', )
 		st.plotly_chart( figure, use_container_width=True, config=cfg.CHART_CONFIG,
 			key=f'{key}-chart', )
 	except Error:
@@ -3997,9 +3999,10 @@ def create_category_figure( df_packets: pd.DataFrame, column_name: str, title: s
 				showlegend=False, marker={ 'color': cfg.ACCENT_BLUE, }, text=df_values[
 					'packets' ],
 				textposition='outside', cliponaxis=False, ) )
-		figure.update_layout( title=None, showlegend=False, xaxis_title='Packet Count',
+		figure.update_layout( title_text='', showlegend=False, xaxis_title='Packet Count',
 			yaxis_title='', uirevision=title, )
-		figure.update_xaxes( type='linear', dtick=1, range=[ 0, maximum_packets * 1.18, ], )
+		figure.update_xaxes( type='linear', range=[ 0, maximum_packets * 1.18, ],
+			rangemode='tozero', tickformat=',d', automargin=True, )
 		figure.update_yaxes( type='category', categoryorder='array', categoryarray=category_order,
 			automargin=True, )
 		return configure_figure( figure, cfg.SUMMARY_CHART_HEIGHT, False, )
@@ -4041,7 +4044,7 @@ def create_numeric_histogram( df_packets: pd.DataFrame, column_name: str,
 		df_values = df_values.dropna( subset=[ column_name ] )
 		figure = go.Figure(
 			go.Histogram( x=df_values[ column_name ], nbinsx=30, marker={ 'color': cfg.CYAN, }, ) )
-		figure.update_layout( title=None, xaxis_title=column_name.replace( '_', ' ' ).title( ),
+		figure.update_layout( title_text='', xaxis_title=column_name.replace( '_', ' ' ).title( ),
 			yaxis_title='Frequency', uirevision=title, )
 		return configure_figure( figure, cfg.SUMMARY_CHART_HEIGHT, False, )
 	except Error:
