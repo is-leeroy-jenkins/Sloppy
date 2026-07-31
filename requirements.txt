@@ -6,3 +6,10 @@ streamlit
 scapy
 streamlit-extras
 plotly
+# mkdocs
+mkdocs
+mkdocs-material
+mkdocstrings[python]
+mkdocs-autorefs
+pymdown-extensions
+black
