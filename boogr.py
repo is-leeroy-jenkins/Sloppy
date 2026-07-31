@@ -181,8 +181,7 @@ class Error( Exception ):
 	Attributes:
 		error (Optional[Exception]): Source exception being wrapped.
 		heading (Optional[str]): Optional sanitized user-facing heading or category.
-		cause (Optional[str]): Sanitized component, class, or module purpose associated with the
-		failure.
+		cause (Optional[str]): Sanitized component, class, or module purpose associated with the failure.
 		method (Optional[str]): Sanitized method or function signature associated with the failure.
 		module (Optional[str]): Sanitized module name associated with the failure.
 		type (Optional[type]): Exception type captured from ``sys.exc_info``.
@@ -502,19 +501,17 @@ class Logger( ):
 		"""Delete log rows older than the configured retention period.
 
 		Purpose:
-			Support the prototype data-handling requirement by keeping local diagnostic logs short
-			lived. The method deletes rows whose ``created_on`` timestamp is older than the
-			configured
-			retention window. If retention is set to zero or a negative value, no purge is
-			performed.
+			Removes diagnostic log records whose ``created_on`` timestamp is older than the
+			configured retention period. A retention period of zero or fewer days disables
+			purging.
 
 		Args:
-			retention_days (int): Optional retention window in days. When omitted, the value is
-			read
-				from ``cfg.LOG_RETENTION_DAYS`` and defaults to seven days.
+			retention_days (int): Retention period in days. When omitted, the method uses
+				``cfg.LOG_RETENTION_DAYS`` and defaults to seven days.
 
 		Returns:
-			int: Number of deleted rows, or ``0`` when no rows are deleted or purge fails.
+			int: Number of deleted rows. Returns ``0`` when no rows are deleted or the purge
+				operation fails.
 		"""
 		try:
 			self.ensure_database( )

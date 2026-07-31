@@ -2,7 +2,7 @@
 
 Sloppy is a Streamlit network-analysis application for packet capture, packet replay, protocol normalization, traffic filtering, OSI-layer analysis, interactive visualization, and SQLite-backed exception logging.
 
-[](images/sloppy_project.png)
+![Sloppy Network Analyzer](images/sloppy_project.png)
 
 ## :material-target: Core Capabilities
 

@@ -16,8 +16,6 @@ theme:
   name: material
   language: en
 
-  logo: material/access-point-network
-
   icon:
     logo: material/access-point-network
     repo: fontawesome/brands/github

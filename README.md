@@ -4,8 +4,6 @@
 
 
 
-
-
 ## 📌 Overview
 
 **Sloppy** is a Python-based, interactive network packet analysis application built with **Streamlit**.
