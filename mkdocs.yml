@@ -1,0 +1,126 @@
+site_name: Sloppy Network Analyzer
+site_description: Technical, operational, and API documentation for the Sloppy Streamlit network-analysis application.
+site_author: Terry D. Eppler
+
+theme:
+  name: material
+  language: en
+  features:
+    - navigation.instant
+    - navigation.instant.progress
+    - navigation.tabs
+    - navigation.tabs.sticky
+    - navigation.sections
+    - navigation.expand
+    - navigation.indexes
+    - navigation.top
+    - toc.follow
+    - search.suggest
+    - search.highlight
+    - search.share
+    - content.code.copy
+    - content.code.annotate
+  palette:
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: black
+      accent: blue
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: black
+      accent: blue
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+  icon:
+    logo: material/access-point-network
+    repo: fontawesome/brands/github
+
+nav:
+  - Home: index.md
+  - Architecture: architecture.md
+  - OSI Coverage: osi-layers.md
+  - Workflows: workflows.md
+  - User Guide:
+      - Overview: user-guide/index.md
+      - Application Overview: user-guide/overview.md
+      - Installation: user-guide/installation.md
+      - Running the Application: user-guide/running-the-app.md
+      - Capture Modes: user-guide/capture-modes.md
+      - Analysis Modes: user-guide/analysis-modes.md
+      - Filters: user-guide/filters.md
+      - Visualization: user-guide/visualization.md
+      - Troubleshooting: user-guide/troubleshooting.md
+  - Logging: logging.md
+  - Configuration: configuration.md
+  - API Reference:
+      - Overview: api/index.md
+      - Application: api/app.md
+      - Logging: api/boogr.md
+      - Configuration: api/config.md
+  - Development: development.md
+
+plugins:
+  - search:
+      lang: en
+      separator: '[\\s\\-\\.]+'
+  - autorefs
+  - mkdocstrings:
+      handlers:
+        python:
+          paths: [ . ]
+          options:
+            docstring_style: google
+            show_source: false
+            show_root_heading: true
+            show_root_full_path: false
+            show_signature_annotations: true
+            separate_signature: true
+            signature_crossrefs: true
+            members_order: source
+            merge_init_into_class: true
+            heading_level: 2
+            filters:
+              - "!^_"
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - footnotes
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+      toc_depth: 3
+  - pymdownx.details
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.inlinehilite
+  - pymdownx.keys
+  - pymdownx.snippets
+  - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.tasklist:
+      custom_checkbox: true
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
+
+extra_css:
+  - stylesheets/extra.css
+
+watch:
+  - app.py
+  - boogr.py
+  - config.py
+
+validation:
+  omitted_files: warn
+  absolute_links: warn
+  unrecognized_links: warn
