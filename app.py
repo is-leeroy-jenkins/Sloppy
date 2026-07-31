@@ -47,6 +47,7 @@ from __future__ import annotations
 # PART 1 — Imports, Configuration, and Guardrails
 # ==========================================================================================
 import config as cfg
+import ipaddress
 import queue
 import random
 import threading
@@ -58,23 +59,63 @@ import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
 
+from osi_protocol import (
+	create_conversation_snapshot,
+	create_http_transaction_snapshot,
+	decode_dhcp_message_type,
+	decode_dns_query_type,
+	identify_transport_indicators,
+	parse_http_metadata,
+	parse_ntp_metadata,
+	parse_tls_metadata,
+)
+
 # ------------------------------------------------------------------------------------------
-# Sloppy Core (existing, unmodified)
+# Streamlit Configuration
 # ------------------------------------------------------------------------------------------
-from __init__ import Ethernet, IPv4, TCP, UDP, ICMP, HTTP
+st.set_page_config( page_title='Sloppy Joe', page_icon=cfg.ICON, layout='wide', )
 
 # ------------------------------------------------------------------------------------------
 # Optional Live Capture Backend
 # ------------------------------------------------------------------------------------------
 try:
+	from scapy.all import ARP as ScapyARP
+	from scapy.all import DHCP as ScapyDHCP
+	from scapy.all import DNS as ScapyDNS
+	from scapy.all import DNSQR as ScapyDNSQR
+	from scapy.all import Dot1Q as ScapyDot1Q
 	from scapy.all import Ether as ScapyEther
+	from scapy.all import ICMP as ScapyICMP
+	from scapy.all import IP as ScapyIP
+	from scapy.all import IPv6 as ScapyIPv6
+	from scapy.all import Raw as ScapyRaw
+	from scapy.all import TCP as ScapyTCP
+	from scapy.all import UDP as ScapyUDP
 	from scapy.all import sniff
-	
+
 	SCAPY_AVAILABLE = True
 	SCAPY_IMPORT_ERROR = ''
 except Exception as e:
 	SCAPY_AVAILABLE = False
 	SCAPY_IMPORT_ERROR = str( e )
+
+try:
+	from scapy.layers.inet6 import ICMPv6DestUnreach as ScapyICMPv6DestUnreach
+	from scapy.layers.inet6 import ICMPv6EchoReply as ScapyICMPv6EchoReply
+	from scapy.layers.inet6 import ICMPv6EchoRequest as ScapyICMPv6EchoRequest
+	from scapy.layers.inet6 import ICMPv6TimeExceeded as ScapyICMPv6TimeExceeded
+	from scapy.layers.inet6 import ICMPv6PacketTooBig as ScapyICMPv6PacketTooBig
+	from scapy.layers.inet6 import ICMPv6ParamProblem as ScapyICMPv6ParamProblem
+	from scapy.layers.inet6 import ICMPv6ND_RS as ScapyICMPv6RouterSolicitation
+	from scapy.layers.inet6 import ICMPv6ND_RA as ScapyICMPv6RouterAdvertisement
+	from scapy.layers.inet6 import ICMPv6ND_NS as ScapyICMPv6NeighborSolicitation
+	from scapy.layers.inet6 import ICMPv6ND_NA as ScapyICMPv6NeighborAdvertisement
+	from scapy.layers.inet6 import ICMPv6ND_Redirect as ScapyICMPv6Redirect
+	from scapy.layers.inet6 import IPv6ExtHdrFragment as ScapyIPv6Fragment
+
+	SCAPY_IPV6_CONTROL_AVAILABLE = True
+except Exception:
+	SCAPY_IPV6_CONTROL_AVAILABLE = False
 
 # ------------------------------------------------------------------------------------------
 # Application Styling
@@ -199,56 +240,408 @@ def normalize_packet( record: Dict, session_id: str, ) -> Dict:
 	Normalize a packet record.
 
 	Purpose:
-	    Converts a partially populated packet record into the schema consumed by the
-	    dashboard and associates it with the active capture session.
+	    Converts packet metadata into the stable superset schema used by every analysis
+	    mode while preserving the original Network Analysis members.
 
 	Args:
-	    record (Dict): Packet values produced by the demo generator or Scapy callback.
-	    session_id (str): Identifier assigned to the active capture session.
+	    record (Dict): Packet metadata to normalize.
+	    session_id (str): Active capture-session identifier.
 
 	Returns:
 	    Dict: Normalized packet record.
 	"""
 	throw_if( 'record', record )
 	throw_if( 'session_id', session_id )
-	return { 'timestamp': record.get( 'timestamp', datetime.utcnow( ), ),
-		'src_ip': record.get( 'src_ip' ), 'dst_ip': record.get( 'dst_ip' ),
+	return {
+		'timestamp': record.get( 'timestamp', datetime.utcnow( ) ),
+		'src_mac': record.get( 'src_mac', '' ), 'dst_mac': record.get( 'dst_mac', '' ),
+		'ether_type': record.get( 'ether_type', 0 ),
+		'ether_type_name': record.get( 'ether_type_name', cfg.ETHER_TYPE_OTHER ),
+		'inner_ether_type': record.get( 'inner_ether_type' ),
+		'inner_ether_type_name': record.get( 'inner_ether_type_name', '' ),
+		'frame_class': record.get( 'frame_class', cfg.FRAME_CLASS_UNICAST ),
+		'is_broadcast': record.get( 'is_broadcast', False ),
+		'is_multicast': record.get( 'is_multicast', False ),
+		'vlan_id': record.get( 'vlan_id' ), 'vlan_priority': record.get( 'vlan_priority' ),
+		'arp_operation': record.get( 'arp_operation', '' ),
+		'arp_sender_ip': record.get( 'arp_sender_ip', '' ),
+		'arp_target_ip': record.get( 'arp_target_ip', '' ),
+		'ip_version': record.get( 'ip_version' ), 'src_ip': record.get( 'src_ip' ),
+		'dst_ip': record.get( 'dst_ip' ), 'ttl': record.get( 'ttl' ),
+		'hop_limit': record.get( 'hop_limit' ),
+		'ipv6_flow_label': record.get( 'ipv6_flow_label' ),
+		'dscp': record.get( 'dscp' ),
+		'ecn': record.get( 'ecn' ), 'ip_identification': record.get( 'ip_identification' ),
+		'ip_flags': record.get( 'ip_flags', '' ),
+		'fragment_offset': record.get( 'fragment_offset', 0 ),
+		'ipv6_fragment_id': record.get( 'ipv6_fragment_id' ),
+		'ipv6_more_fragments': record.get( 'ipv6_more_fragments', False ),
+		'ipv6_fragment_next_header': record.get( 'ipv6_fragment_next_header' ),
+		'is_fragmented': record.get( 'is_fragmented', False ),
+		'icmp_type': record.get( 'icmp_type' ), 'icmp_code': record.get( 'icmp_code' ),
+		'address_scope': record.get( 'address_scope', '' ),
 		'protocol': record.get( 'protocol' ), 'src_port': record.get( 'src_port' ),
 		'dst_port': record.get( 'dst_port' ), 'flags': record.get( 'flags', '' ),
-		'length': record.get( 'length', 0 ), 'session': session_id, }
+		'tcp_sequence': record.get( 'tcp_sequence' ),
+		'tcp_acknowledgment': record.get( 'tcp_acknowledgment' ),
+		'tcp_window': record.get( 'tcp_window' ),
+		'tcp_header_length': record.get( 'tcp_header_length' ),
+		'udp_length': record.get( 'udp_length' ),
+		'tcp_payload_length': record.get( 'tcp_payload_length', 0 ),
+		'tls_record_type': record.get( 'tls_record_type', '' ),
+		'tls_version': record.get( 'tls_version', '' ),
+		'tls_handshake_type': record.get( 'tls_handshake_type', '' ),
+		'tls_server_name': record.get( 'tls_server_name', '' ),
+		'tls_alpn': record.get( 'tls_alpn', '' ),
+		'tls_cipher_suite': record.get( 'tls_cipher_suite', '' ),
+		'application_protocol': record.get( 'application_protocol', '' ),
+		'dns_query': record.get( 'dns_query', '' ),
+		'dns_query_type': record.get( 'dns_query_type', '' ),
+		'dns_response_code': record.get( 'dns_response_code' ),
+		'dns_question_count': record.get( 'dns_question_count', 0 ),
+		'dns_answer_count': record.get( 'dns_answer_count', 0 ),
+		'dns_authority_count': record.get( 'dns_authority_count', 0 ),
+		'dns_additional_count': record.get( 'dns_additional_count', 0 ),
+		'dns_is_response': record.get( 'dns_is_response', False ),
+		'dns_recursion_desired': record.get( 'dns_recursion_desired', False ),
+		'dns_recursion_available': record.get( 'dns_recursion_available', False ),
+		'dns_authoritative': record.get( 'dns_authoritative', False ),
+		'dns_truncated': record.get( 'dns_truncated', False ),
+		'http_method': record.get( 'http_method', '' ), 'http_host': record.get( 'http_host', '' ),
+		'http_path': record.get( 'http_path', '' ), 'http_status': record.get( 'http_status' ),
+		'dhcp_message_type': record.get( 'dhcp_message_type', '' ),
+		'ntp_mode': record.get( 'ntp_mode', '' ),
+		'ntp_version': record.get( 'ntp_version' ),
+		'length': record.get( 'length', 0 ), 'session': session_id,
+	}
 
-def generate_demo_packet( session_id: str, ) -> Dict:
+
+def classify_destination_mac( destination_mac: str, ) -> tuple[ str, bool, bool ]:
 	"""
-	Generate a demonstration packet.
+	Classify a destination MAC address.
 
 	Purpose:
-	    Produces a normalized TCP, UDP, or ICMP packet record for replay and interface
-	    validation when live packet capture is not required.
+	    Determines whether a destination MAC address represents unicast, multicast, or
+	    Ethernet broadcast traffic.
 
 	Args:
-	    session_id (str): Identifier assigned to the active capture session.
+	    destination_mac (str): Destination MAC address.
+
+	Returns:
+	    tuple[str, bool, bool]: Frame classification, broadcast indicator, and multicast
+	        indicator.
+	"""
+	throw_if( 'destination_mac', destination_mac, )
+	value = destination_mac.lower( )
+	if value == cfg.BROADCAST_MAC_ADDRESS:
+		return cfg.FRAME_CLASS_BROADCAST, True, False
+	if int( value.split( ':' )[ 0 ], 16, ) & 1:
+		return cfg.FRAME_CLASS_MULTICAST, False, True
+	return cfg.FRAME_CLASS_UNICAST, False, False
+
+
+def resolve_ether_type_name( ether_type: int, ) -> str:
+	"""
+	Resolve an EtherType name.
+
+	Purpose:
+	    Maps a numeric Ethernet protocol identifier to the configured display value.
+
+	Args:
+	    ether_type (int): Numeric Ethernet protocol identifier.
+
+	Returns:
+	    str: Configured EtherType display value.
+	"""
+	throw_if( 'ether_type', ether_type, )
+	return cfg.ETHER_TYPE_NAMES.get( ether_type, cfg.ETHER_TYPE_OTHER, )
+
+
+def resolve_arp_operation( operation: int, ) -> str:
+	"""
+	Resolve an ARP operation.
+
+	Purpose:
+	    Maps an ARP operation number to its configured request, reply, or other label.
+
+	Args:
+	    operation (int): Numeric ARP operation value.
+
+	Returns:
+	    str: Readable ARP operation.
+	"""
+	throw_if( 'operation', operation, )
+	if operation == 1:
+		return cfg.ARP_OPERATION_REQUEST
+	if operation == 2:
+		return cfg.ARP_OPERATION_REPLY
+	return cfg.ARP_OPERATION_OTHER
+
+
+def generate_demo_mac_address( host_id: int, ) -> str:
+	"""
+	Generate a demonstration MAC address.
+
+	Purpose:
+	    Creates a deterministic locally administered MAC address from a host identifier.
+
+	Args:
+	    host_id (int): Host identifier encoded into the final MAC octet.
+
+	Returns:
+	    str: Colon-delimited demonstration MAC address.
+	"""
+	throw_if( 'host_id', host_id, )
+	return f'02:00:00:00:00:{host_id:02x}'
+
+
+def classify_ip_scope( address: str, ) -> str:
+	"""
+	Classify an IP address scope.
+
+	Purpose:
+	    Assigns a private, public, multicast, loopback, link-local, reserved, or
+	    documentation classification to an IPv4 or IPv6 address.
+
+	Args:
+	    address (str): IPv4 or IPv6 address.
+
+	Returns:
+	    str: Address-scope classification.
+	"""
+	throw_if( 'address', address, )
+	ip_address = ipaddress.ip_address( address )
+	if ip_address in ipaddress.ip_network( '192.0.2.0/24' ) or \
+		ip_address in ipaddress.ip_network( '198.51.100.0/24' ) or \
+		ip_address in ipaddress.ip_network( '203.0.113.0/24' ) or \
+		ip_address in ipaddress.ip_network( '2001:db8::/32' ):
+		return 'Documentation'
+	if ip_address.is_private:
+		return 'Private'
+	if ip_address.is_multicast:
+		return 'Multicast'
+	if ip_address.is_loopback:
+		return 'Loopback'
+	if ip_address.is_link_local:
+		return 'Link Local'
+	if ip_address.is_reserved:
+		return 'Reserved'
+	return 'Public'
+
+
+def create_demo_record( base_record: Dict, values: Dict, session_id: str,
+	offset_ms: int, ) -> Dict:
+	"""
+	Create one demonstration record.
+
+	Purpose:
+	    Applies scenario-specific values to a controlled base record and normalizes the
+	    result at a deterministic offset from the scenario start time.
+
+	Args:
+	    base_record (Dict): Controlled base packet metadata.
+	    values (Dict): Scenario-specific packet values.
+	    session_id (str): Active capture-session identifier.
+	    offset_ms (int): Millisecond offset from the scenario base timestamp.
 
 	Returns:
 	    Dict: Normalized demonstration packet record.
 	"""
-	throw_if( 'session_id', session_id )
-	protocol = random.choice( cfg.PROTOCOL_ORDER )
-	record = { 'timestamp': datetime.utcnow( ), 'src_ip': f'192.168.1.{random.randint( 1, 50 )}',
-		'dst_ip': f'10.0.0.{random.randint( 1, 50 )}', 'protocol': protocol,
-		'length': random.randint( 64, 1514 ), 'src_port': None, 'dst_port': None, 'flags': '', }
-	
-	if protocol == 'TCP':
-		record.update( { 'src_port': random.randint( 1024, 65535, ),
-			'dst_port': random.choice( [ 22, 80, 443, 3389, 8080, ] ),
-			'flags': random.choice( [ 'SYN', 'ACK', 'PSH', 'FIN', 'RST', ] ), } )
-	elif protocol == 'UDP':
-		record.update( { 'src_port': random.randint( 1024, 65535, ),
-			'dst_port': random.choice( [ 53, 67, 68, 123, 161, 5353, ] ), } )
-	else:
-		record[ 'flags' ] = random.choice(
-			[ 'ECHO_REQUEST', 'ECHO_REPLY', 'DEST_UNREACH', 'TTL_EXCEEDED', ] )
-	
+	throw_if( 'base_record', base_record, )
+	throw_if( 'values', values, )
+	throw_if( 'session_id', session_id, )
+	record = base_record.copy( )
+	record[ 'timestamp' ] = base_record[ 'timestamp' ] + pd.Timedelta( milliseconds=offset_ms )
+	record.update( values )
 	return normalize_packet( record, session_id, )
+
+
+def generate_demo_scenario( session_id: str, ) -> List[ Dict ]:
+	"""
+	Generate a coherent demonstration scenario.
+
+	Purpose:
+	    Produces internally consistent Layer 2 through Layer 7 request-response and
+	    connection-lifecycle traffic without relying on unrelated random packets.
+
+	Args:
+	    session_id (str): Active capture-session identifier.
+
+	Returns:
+	    List[Dict]: Related normalized packet records.
+	"""
+	throw_if( 'session_id', session_id, )
+	scenario = random.choice( [ 'ARP', 'TCP', 'DNS', 'HTTP', 'DHCP', 'NTP', 'TLS',
+		'IPv6', 'VLAN', 'FRAGMENT', ] )
+	source_host = random.randint( 2, 50 )
+	destination_host = random.randint( 51, 100 )
+	source_ip = f'192.168.1.{source_host}'
+	destination_ip = f'10.0.0.{destination_host}'
+	source_mac = generate_demo_mac_address( source_host, )
+	destination_mac = generate_demo_mac_address( destination_host, )
+	base = {
+		'timestamp': datetime.utcnow( ), 'src_mac': source_mac, 'dst_mac': destination_mac,
+		'ether_type': 0x0800, 'ether_type_name': cfg.ETHER_TYPE_IPV4,
+		'frame_class': cfg.FRAME_CLASS_UNICAST, 'ip_version': 4, 'src_ip': source_ip,
+		'dst_ip': destination_ip, 'ttl': 64, 'dscp': 0, 'ecn': 0,
+		'ip_identification': random.randint( 0, 65535 ), 'fragment_offset': 0,
+		'is_fragmented': False, 'address_scope': classify_ip_scope( destination_ip, ),
+		'length': random.randint( 64, 900 ),
+	}
+	reverse = {
+		'src_mac': destination_mac, 'dst_mac': source_mac, 'src_ip': destination_ip,
+		'dst_ip': source_ip, 'address_scope': classify_ip_scope( source_ip, ),
+	}
+	if scenario == 'ARP':
+		return [
+			create_demo_record( base, { 'dst_mac': cfg.BROADCAST_MAC_ADDRESS,
+				'ether_type': 0x0806, 'ether_type_name': cfg.ETHER_TYPE_ARP,
+				'frame_class': cfg.FRAME_CLASS_BROADCAST, 'is_broadcast': True,
+				'ip_version': None, 'src_ip': None, 'dst_ip': None,
+				'arp_operation': cfg.ARP_OPERATION_REQUEST, 'arp_sender_ip': source_ip,
+				'arp_target_ip': destination_ip, }, session_id, 0, ),
+			create_demo_record( base, reverse | { 'ether_type': 0x0806,
+				'ether_type_name': cfg.ETHER_TYPE_ARP, 'ip_version': None, 'src_ip': None,
+				'dst_ip': None, 'arp_operation': cfg.ARP_OPERATION_REPLY,
+				'arp_sender_ip': destination_ip, 'arp_target_ip': source_ip, }, session_id, 15, ),
+		]
+	if scenario == 'TCP':
+		source_port = random.randint( 49152, 65535 )
+		destination_port = random.choice( [ 22, 443, 3389, 8080, ] )
+		client_sequence = random.randint( 1000, 100000 )
+		server_sequence = random.randint( 1000, 100000 )
+		return [
+			create_demo_record( base, { 'protocol': 'TCP', 'src_port': source_port,
+				'dst_port': destination_port, 'flags': 'S', 'tcp_sequence': client_sequence,
+				'tcp_acknowledgment': 0, 'tcp_window': 64240, 'tcp_header_length': 20, }, session_id, 0, ),
+			create_demo_record( base, reverse | { 'protocol': 'TCP', 'src_port': destination_port,
+				'dst_port': source_port, 'flags': 'SA', 'tcp_sequence': server_sequence,
+				'tcp_acknowledgment': client_sequence + 1, 'tcp_window': 65535,
+				'tcp_header_length': 20, }, session_id, 20, ),
+			create_demo_record( base, { 'protocol': 'TCP', 'src_port': source_port,
+				'dst_port': destination_port, 'flags': 'A', 'tcp_sequence': client_sequence + 1,
+				'tcp_acknowledgment': server_sequence + 1, 'tcp_window': 64240,
+				'tcp_header_length': 20, }, session_id, 35, ),
+			create_demo_record( base, { 'protocol': 'TCP', 'src_port': source_port,
+				'dst_port': destination_port, 'flags': 'FA', 'tcp_sequence': client_sequence + 1,
+				'tcp_acknowledgment': server_sequence + 1, 'tcp_window': 64240,
+				'tcp_header_length': 20, }, session_id, 150, ),
+			create_demo_record( base, reverse | { 'protocol': 'TCP', 'src_port': destination_port,
+				'dst_port': source_port, 'flags': 'A', 'tcp_sequence': server_sequence + 1,
+				'tcp_acknowledgment': client_sequence + 2, 'tcp_window': 65535,
+				'tcp_header_length': 20, }, session_id, 165, ),
+			create_demo_record( base, reverse | { 'protocol': 'TCP', 'src_port': destination_port,
+				'dst_port': source_port, 'flags': 'FA', 'tcp_sequence': server_sequence + 1,
+				'tcp_acknowledgment': client_sequence + 2, 'tcp_window': 65535,
+				'tcp_header_length': 20, }, session_id, 180, ),
+			create_demo_record( base, { 'protocol': 'TCP', 'src_port': source_port,
+				'dst_port': destination_port, 'flags': 'A', 'tcp_sequence': client_sequence + 2,
+				'tcp_acknowledgment': server_sequence + 2, 'tcp_window': 64240,
+				'tcp_header_length': 20, }, session_id, 195, ),
+		]
+	if scenario == 'DNS':
+		query = random.choice( cfg.DEMO_DNS_NAMES )
+		query_type = random.choice( cfg.DNS_QUERY_TYPE_ORDER )
+		source_port = random.randint( 49152, 65535 )
+		return [
+			create_demo_record( base, { 'protocol': 'UDP', 'src_port': source_port,
+				'dst_port': 53, 'udp_length': 60, 'application_protocol': 'DNS',
+				'dns_query': query, 'dns_query_type': query_type, 'dns_response_code': 0, }, session_id, 0, ),
+			create_demo_record( base, reverse | { 'protocol': 'UDP', 'src_port': 53,
+				'dst_port': source_port, 'udp_length': 110, 'application_protocol': 'DNS',
+				'dns_query': query, 'dns_query_type': query_type, 'dns_response_code': 0, }, session_id, 18, ),
+		]
+	if scenario == 'HTTP':
+		source_port = random.randint( 49152, 65535 )
+		host = random.choice( cfg.DEMO_DNS_NAMES )
+		path = random.choice( [ '/', '/api/items', '/login', '/health', ] )
+		return [
+			create_demo_record( base, { 'protocol': 'TCP', 'src_port': source_port, 'dst_port': 80,
+				'flags': 'PA', 'tcp_sequence': 1001, 'tcp_acknowledgment': 5001,
+				'tcp_window': 64240, 'tcp_header_length': 20, 'tcp_payload_length': 64,
+				'application_protocol': 'HTTP', 'http_method': 'GET', 'http_host': host,
+				'http_path': path, }, session_id, 0, ),
+			create_demo_record( base, reverse | { 'protocol': 'TCP', 'src_port': 80,
+				'dst_port': source_port, 'flags': 'PA', 'tcp_sequence': 5001,
+				'tcp_acknowledgment': 1065, 'tcp_window': 65535, 'tcp_header_length': 20,
+				'tcp_payload_length': 128, 'application_protocol': 'HTTP',
+				'http_status': random.choice( [ 200, 201, 301, 404, 500, ] ), }, session_id, 35, ),
+		]
+	if scenario == 'DHCP':
+		client_ip = '0.0.0.0'
+		server_ip = destination_ip
+		broadcast = { 'dst_mac': cfg.BROADCAST_MAC_ADDRESS, 'dst_ip': '255.255.255.255',
+			'frame_class': cfg.FRAME_CLASS_BROADCAST, 'is_broadcast': True,
+			'address_scope': 'Reserved', }
+		return [
+			create_demo_record( base, broadcast | { 'src_ip': client_ip, 'protocol': 'UDP',
+				'src_port': 68, 'dst_port': 67, 'udp_length': 300,
+				'application_protocol': 'DHCP', 'dhcp_message_type': 'Discover', }, session_id, 0, ),
+			create_demo_record( base, { 'src_mac': destination_mac, 'dst_mac': cfg.BROADCAST_MAC_ADDRESS,
+				'src_ip': server_ip, 'dst_ip': '255.255.255.255', 'frame_class': cfg.FRAME_CLASS_BROADCAST,
+				'is_broadcast': True, 'address_scope': 'Reserved', 'protocol': 'UDP', 'src_port': 67,
+				'dst_port': 68, 'udp_length': 300, 'application_protocol': 'DHCP',
+				'dhcp_message_type': 'Offer', }, session_id, 30, ),
+			create_demo_record( base, broadcast | { 'src_ip': client_ip, 'protocol': 'UDP',
+				'src_port': 68, 'dst_port': 67, 'udp_length': 300,
+				'application_protocol': 'DHCP', 'dhcp_message_type': 'Request', }, session_id, 60, ),
+			create_demo_record( base, { 'src_mac': destination_mac, 'dst_mac': source_mac,
+				'src_ip': server_ip, 'dst_ip': source_ip, 'address_scope': classify_ip_scope( source_ip, ),
+				'protocol': 'UDP', 'src_port': 67, 'dst_port': 68, 'udp_length': 300,
+				'application_protocol': 'DHCP', 'dhcp_message_type': 'Acknowledge', }, session_id, 90, ),
+		]
+	if scenario == 'NTP':
+		source_port = random.randint( 49152, 65535 )
+		return [
+			create_demo_record( base, { 'protocol': 'UDP', 'src_port': source_port, 'dst_port': 123,
+				'udp_length': 48, 'application_protocol': 'NTP', 'ntp_version': 4,
+				'ntp_mode': 'Client', }, session_id, 0, ),
+			create_demo_record( base, reverse | { 'protocol': 'UDP', 'src_port': 123,
+				'dst_port': source_port, 'udp_length': 48, 'application_protocol': 'NTP',
+				'ntp_version': 4, 'ntp_mode': 'Server', }, session_id, 25, ),
+		]
+	if scenario == 'VLAN':
+		return [ create_demo_record( base, { 'ether_type': 0x8100,
+			'ether_type_name': cfg.ETHER_TYPE_VLAN, 'inner_ether_type': 0x0800,
+			'inner_ether_type_name': cfg.ETHER_TYPE_IPV4, 'vlan_id': random.choice( [ 10, 20, 30, 40, 100, ] ),
+			'vlan_priority': random.randint( 0, 7 ), 'protocol': 'TCP',
+			'src_port': random.randint( 49152, 65535 ), 'dst_port': 443, 'flags': 'A',
+			'tcp_sequence': random.randint( 1000, 100000 ), 'tcp_acknowledgment': 5001,
+			'tcp_window': 64240, 'tcp_header_length': 20, }, session_id, 0, ) ]
+	if scenario == 'FRAGMENT':
+		identification = random.randint( 0, 65535 )
+		return [
+			create_demo_record( base, { 'ip_identification': identification, 'ip_flags': 'MF',
+				'fragment_offset': 0, 'is_fragmented': True, 'protocol': 'UDP',
+				'src_port': 40000, 'dst_port': 50000, 'udp_length': 1480, }, session_id, 0, ),
+			create_demo_record( base, { 'ip_identification': identification, 'ip_flags': '',
+				'fragment_offset': 185, 'is_fragmented': True, 'protocol': None,
+				'src_port': None, 'dst_port': None, 'udp_length': None, }, session_id, 8, ),
+		]
+	if scenario == 'TLS':
+		source_port = random.randint( 49152, 65535 )
+		server_name = random.choice( cfg.DEMO_DNS_NAMES )
+		return [
+			create_demo_record( base, { 'protocol': 'TCP', 'src_port': source_port, 'dst_port': 443,
+				'flags': 'PA', 'tcp_sequence': 1001, 'tcp_acknowledgment': 5001,
+				'tcp_window': 64240, 'tcp_header_length': 20, 'tcp_payload_length': 180,
+				'tls_record_type': '22', 'tls_version': 'TLS 1.3',
+				'tls_handshake_type': 'Client Hello', 'tls_server_name': server_name,
+				'tls_alpn': 'h2', }, session_id, 0, ),
+			create_demo_record( base, reverse | { 'protocol': 'TCP', 'src_port': 443,
+				'dst_port': source_port, 'flags': 'PA', 'tcp_sequence': 5001,
+				'tcp_acknowledgment': 1181, 'tcp_window': 65535, 'tcp_header_length': 20,
+				'tcp_payload_length': 120, 'tls_record_type': '22', 'tls_version': 'TLS 1.3',
+				'tls_handshake_type': 'Server Hello',
+				'tls_cipher_suite': random.choice( cfg.TLS_CIPHER_SUITES ), }, session_id, 30, ),
+		]
+	return [ create_demo_record( base, { 'ether_type': 0x86DD,
+		'ether_type_name': cfg.ETHER_TYPE_IPV6, 'ip_version': 6,
+		'src_ip': f'2001:db8::{source_host}', 'dst_ip': f'2001:db8:1::{destination_host}',
+		'ttl': None, 'hop_limit': 64, 'ipv6_flow_label': random.randint( 0, 1048575 ),
+		'address_scope': 'Documentation', 'protocol': 'ICMPv6', 'flags': 'TYPE_128',
+		'icmp_type': 128, 'icmp_code': 0, }, session_id, 0, ) ]
+
 
 # ---- Live Packet Capture -----
 
@@ -275,14 +668,24 @@ def write_capture_error( capture_error_queue: queue.Queue, exception: Exception,
 	except queue.Full:
 		return
 
+
+
+
+
+
+
+
+
+
+
 def scapy_callback( packet: object, packet_queue: queue.Queue,
 	capture_error_queue: queue.Queue, ) -> None:
 	"""
 	Process a Scapy packet.
 
 	Purpose:
-	    Parses supported Ethernet and IPv4 packets into plain packet records and writes
-	    them to a thread-safe queue without accessing Streamlit session state.
+	    Captures Layer 2 through Layer 7 metadata from supported Scapy packets and writes
+	    plain dictionaries to the packet queue without accessing Streamlit session state.
 
 	Args:
 	    packet (object): Packet supplied by Scapy.
@@ -290,50 +693,193 @@ def scapy_callback( packet: object, packet_queue: queue.Queue,
 	    capture_error_queue (queue.Queue): Thread-safe queue receiving parsing errors.
 
 	Returns:
-	    None: This function writes supported packet records into the packet queue.
+	    None: This function queues one supported packet record.
 	"""
 	try:
 		throw_if( 'packet', packet, )
 		throw_if( 'packet_queue', packet_queue, )
 		throw_if( 'capture_error_queue', capture_error_queue, )
-		if not packet.haslayer( ScapyEther ):
+		if not SCAPY_AVAILABLE or not packet.haslayer( ScapyEther ):
 			return
-		
 		raw = bytes( packet )
-		ethernet = Ethernet( raw )
-		if ethernet.proto not in (8, 0x0800, 2048,):
-			return
-		
-		ipv4 = IPv4( ethernet.data )
-		record = { 'timestamp': datetime.utcnow( ), 'src_ip': ipv4.src, 'dst_ip': ipv4.target,
-			'protocol': None, 'src_port': None, 'dst_port': None, 'flags': '',
-			'length': len( raw ), }
-		
-		if ipv4.proto == 6:
-			tcp = TCP( ipv4.data )
-			record.update( { 'protocol': 'TCP', 'src_port': tcp.src_port, 'dst_port':
-				tcp.dest_port,
-				'flags': ''.join( [ flag for flag, enabled in
-					{ 'SYN': tcp.flag_syn, 'ACK': tcp.flag_ack, 'FIN': tcp.flag_fin,
-						'RST': tcp.flag_rst, 'PSH': tcp.flag_psh, 'URG': tcp.flag_urg, }.items(
-						
-					) if
-					enabled ] ), } )
-		elif ipv4.proto == 17:
-			udp = UDP( ipv4.data )
-			record.update(
-				{ 'protocol': 'UDP', 'src_port': udp.src_port, 'dst_port': udp.dest_port, } )
-		elif ipv4.proto == 1:
-			icmp = ICMP( ipv4.data )
-			record.update( { 'protocol': 'ICMP', 'flags': f'TYPE_{icmp.type}', } )
-		else:
-			return
-		
+		ethernet = packet.getlayer( ScapyEther )
+		destination_mac = str( ethernet.dst ).lower( )
+		frame_class, is_broadcast, is_multicast = classify_destination_mac( destination_mac, )
+		outer_ether_type = int( ethernet.type )
+		record = {
+			'timestamp': datetime.utcnow( ),
+			'src_mac': str( ethernet.src ).lower( ),
+			'dst_mac': destination_mac,
+			'ether_type': outer_ether_type,
+			'ether_type_name': resolve_ether_type_name( outer_ether_type, ),
+			'inner_ether_type': None,
+			'inner_ether_type_name': '',
+			'frame_class': frame_class,
+			'is_broadcast': is_broadcast,
+			'is_multicast': is_multicast,
+			'length': len( raw ),
+		}
+		if packet.haslayer( ScapyDot1Q ):
+			vlan = packet.getlayer( ScapyDot1Q )
+			inner_ether_type = int( vlan.type )
+			record.update( {
+				'vlan_id': int( vlan.vlan ),
+				'vlan_priority': int( vlan.prio ),
+				'inner_ether_type': inner_ether_type,
+				'inner_ether_type_name': resolve_ether_type_name( inner_ether_type, ),
+			} )
+		if packet.haslayer( ScapyARP ):
+			arp = packet.getlayer( ScapyARP )
+			record.update( {
+				'arp_operation': resolve_arp_operation( int( arp.op ), ),
+				'arp_sender_ip': str( arp.psrc ),
+				'arp_target_ip': str( arp.pdst ),
+			} )
+		elif packet.haslayer( ScapyIP ):
+			ipv4 = packet.getlayer( ScapyIP )
+			record.update( {
+				'ip_version': 4,
+				'src_ip': str( ipv4.src ),
+				'dst_ip': str( ipv4.dst ),
+				'ttl': int( ipv4.ttl ),
+				'dscp': int( ipv4.tos ) >> 2,
+				'ecn': int( ipv4.tos ) & 3,
+				'ip_identification': int( ipv4.id ),
+				'ip_flags': str( ipv4.flags ),
+				'fragment_offset': int( ipv4.frag ),
+				'is_fragmented': bool( int( ipv4.frag ) or 'MF' in str( ipv4.flags ) ),
+				'address_scope': classify_ip_scope( str( ipv4.dst ), ),
+			} )
+		elif packet.haslayer( ScapyIPv6 ):
+			ipv6 = packet.getlayer( ScapyIPv6 )
+			record.update( {
+				'ip_version': 6,
+				'src_ip': str( ipv6.src ),
+				'dst_ip': str( ipv6.dst ),
+				'hop_limit': int( ipv6.hlim ),
+				'dscp': int( ipv6.tc ) >> 2,
+				'ecn': int( ipv6.tc ) & 3,
+				'ipv6_flow_label': int( ipv6.fl ),
+				'address_scope': classify_ip_scope( str( ipv6.dst ), ),
+			} )
+			if SCAPY_IPV6_CONTROL_AVAILABLE and packet.haslayer( ScapyIPv6Fragment ):
+				fragment = packet.getlayer( ScapyIPv6Fragment )
+				record.update( {
+					'fragment_offset': int( fragment.offset ),
+					'is_fragmented': True,
+					'ipv6_fragment_id': int( fragment.id ),
+					'ipv6_more_fragments': bool( fragment.m ),
+					'ipv6_fragment_next_header': int( fragment.nh ),
+				} )
+		non_initial_fragment = bool( record.get( 'fragment_offset', 0 ) > 0 )
+		if packet.haslayer( ScapyTCP ) and not non_initial_fragment:
+			tcp = packet.getlayer( ScapyTCP )
+			record.update( {
+				'protocol': 'TCP',
+				'src_port': int( tcp.sport ),
+				'dst_port': int( tcp.dport ),
+				'flags': str( tcp.flags ),
+				'tcp_sequence': int( tcp.seq ),
+				'tcp_acknowledgment': int( tcp.ack ),
+				'tcp_window': int( tcp.window ),
+				'tcp_header_length': int( tcp.dataofs or 5 ) * 4,
+				'tcp_payload_length': len( bytes( tcp.payload ) ),
+			} )
+		elif packet.haslayer( ScapyUDP ) and not non_initial_fragment:
+			udp = packet.getlayer( ScapyUDP )
+			record.update( {
+				'protocol': 'UDP',
+				'src_port': int( udp.sport ),
+				'dst_port': int( udp.dport ),
+				'udp_length': int( udp.len or 0 ),
+			} )
+		elif packet.haslayer( ScapyICMP ):
+			icmp = packet.getlayer( ScapyICMP )
+			record.update( {
+				'protocol': 'ICMP',
+				'flags': f'TYPE_{int( icmp.type )}',
+				'icmp_type': int( icmp.type ),
+				'icmp_code': int( icmp.code ),
+			} )
+		elif SCAPY_IPV6_CONTROL_AVAILABLE:
+			for layer_class, type_number in (
+				(ScapyICMPv6DestUnreach, 1),
+				(ScapyICMPv6PacketTooBig, 2),
+				(ScapyICMPv6TimeExceeded, 3),
+				(ScapyICMPv6ParamProblem, 4),
+				(ScapyICMPv6EchoRequest, 128),
+				(ScapyICMPv6EchoReply, 129),
+				(ScapyICMPv6RouterSolicitation, 133),
+				(ScapyICMPv6RouterAdvertisement, 134),
+				(ScapyICMPv6NeighborSolicitation, 135),
+				(ScapyICMPv6NeighborAdvertisement, 136),
+				(ScapyICMPv6Redirect, 137),
+			):
+				if packet.haslayer( layer_class ):
+					layer = packet.getlayer( layer_class )
+					record.update( {
+						'protocol': 'ICMPv6',
+						'flags': f'TYPE_{type_number}',
+						'icmp_type': type_number,
+						'icmp_code': int( getattr( layer, 'code', 0 ) ),
+					} )
+					break
+		if packet.haslayer( ScapyDNS ):
+			dns = packet.getlayer( ScapyDNS )
+			query_names: List[ str ] = [ ]
+			query_types: List[ str ] = [ ]
+			question = dns.qd
+			for _ in range( int( dns.qdcount or 0 ) ):
+				if question is None or not hasattr( question, 'qname' ):
+					break
+				query_names.append( bytes( question.qname ).decode( errors='ignore', ).rstrip( '.' ) )
+				query_types.append( decode_dns_query_type( int( question.qtype ), ) )
+				question = getattr( question, 'payload', None )
+			record.update( {
+				'application_protocol': 'DNS',
+				'dns_query': ', '.join( query_names ),
+				'dns_query_type': ', '.join( query_types ),
+				'dns_response_code': int( dns.rcode ),
+				'dns_question_count': int( dns.qdcount or 0 ),
+				'dns_answer_count': int( dns.ancount or 0 ),
+				'dns_authority_count': int( dns.nscount or 0 ),
+				'dns_additional_count': int( dns.arcount or 0 ),
+				'dns_is_response': bool( dns.qr ),
+				'dns_recursion_desired': bool( dns.rd ),
+				'dns_recursion_available': bool( dns.ra ),
+				'dns_authoritative': bool( dns.aa ),
+				'dns_truncated': bool( dns.tc ),
+			} )
+		if packet.haslayer( ScapyDHCP ):
+			dhcp = packet.getlayer( ScapyDHCP )
+			message_type = ''
+			for option in dhcp.options:
+				if isinstance( option, tuple ) and option[ 0 ] == 'message-type':
+					message_type = decode_dhcp_message_type( option[ 1 ], )
+					break
+			record.update( {
+				'application_protocol': 'DHCP',
+				'dhcp_message_type': message_type,
+			} )
+		if packet.haslayer( ScapyRaw ):
+			payload = bytes( packet.getlayer( ScapyRaw ).load )
+			if record.get( 'protocol' ) == 'TCP':
+				http_metadata = parse_http_metadata( payload, )
+				tls_metadata = parse_tls_metadata( payload, )
+				if http_metadata:
+					record.update( http_metadata )
+				elif tls_metadata:
+					record.update( tls_metadata )
+			elif record.get( 'protocol' ) == 'UDP' and (
+				record.get( 'src_port' ) == 123 or record.get( 'dst_port' ) == 123
+			):
+				record.update( parse_ntp_metadata( payload, ) )
 		packet_queue.put_nowait( record )
 	except queue.Full:
 		return
 	except Exception as e:
 		write_capture_error( capture_error_queue, e, )
+
 
 def start_live_capture( packet_queue: queue.Queue, capture_error_queue: queue.Queue,
 	stop_event: threading.Event, ) -> None:
@@ -474,11 +1020,13 @@ def ingest_packets( window_size: int, ) -> int:
 	
 	packet_count = 0
 	if st.session_state.capture_mode == 'Demo / Replay':
-		packet_count = random.randint( 5, 15, )
-		
-		for _ in range( packet_count ):
-			packet = generate_demo_packet( st.session_state.session_id )
-			st.session_state.packets.append( packet )
+		target_count = random.randint( 5, 15, )
+		demo_packets: List[ Dict ] = [ ]
+		while len( demo_packets ) < target_count:
+			demo_packets.extend( generate_demo_scenario( st.session_state.session_id, ) )
+		demo_packets = demo_packets[ :target_count ]
+		st.session_state.packets.extend( demo_packets )
+		packet_count = len( demo_packets )
 	
 	elif (st.session_state.capture_mode == 'Live (Scapy)' and SCAPY_AVAILABLE):
 		packet_count = drain_packet_queue( st.session_state.session_id )
@@ -1282,6 +1830,283 @@ def prepare_packet_editor( df_packets: pd.DataFrame, ) -> pd.DataFrame:
 	return df_editor[ existing_columns ]
 
 # ==========================================================================================
+# Data Link Analysis Helpers
+# ==========================================================================================
+
+def create_data_link_snapshot( packets: List[ Dict ], ether_types: List[ str ],
+	frame_classes: List[ str ], ) -> pd.DataFrame:
+	"""
+	Create a Data Link packet snapshot.
+
+	Purpose:
+	    Converts retained packet records into a typed Layer 2 DataFrame and applies the
+	    active EtherType and frame-class filters without modifying session state.
+
+	Args:
+	    packets (List[Dict]): Retained normalized packet records.
+	    ether_types (List[str]): Included EtherType names.
+	    frame_classes (List[str]): Included frame classifications.
+
+	Returns:
+	    pd.DataFrame: Filtered Data Link packet snapshot.
+	"""
+	throw_if( 'packets', packets, )
+	throw_if( 'ether_types', ether_types, )
+	throw_if( 'frame_classes', frame_classes, )
+	df_packets = pd.DataFrame( packets )
+	if df_packets.empty:
+		return df_packets
+	defaults = {
+		'timestamp': pd.NaT,
+		'src_mac': '',
+		'dst_mac': '',
+		'ether_type': 0,
+		'ether_type_name': cfg.ETHER_TYPE_OTHER,
+		'inner_ether_type': pd.NA,
+		'inner_ether_type_name': '',
+		'frame_class': cfg.FRAME_CLASS_UNICAST,
+		'is_broadcast': False,
+		'is_multicast': False,
+		'vlan_id': pd.NA,
+		'vlan_priority': pd.NA,
+		'arp_operation': '',
+		'arp_sender_ip': '',
+		'arp_target_ip': '',
+		'src_ip': pd.NA,
+		'dst_ip': pd.NA,
+		'length': 0,
+		'session': '',
+	}
+	for column_name, default_value in defaults.items( ):
+		if column_name not in df_packets.columns:
+			df_packets[ column_name ] = default_value
+	df_packets[ 'timestamp' ] = pd.to_datetime( df_packets[ 'timestamp' ], errors='coerce', )
+	df_packets = df_packets[ df_packets[ 'ether_type_name' ].isin( ether_types ) ]
+	df_packets = df_packets[ df_packets[ 'frame_class' ].isin( frame_classes ) ]
+	return df_packets.copy( )
+
+
+def create_data_link_pie( df_packets: pd.DataFrame, ) -> go.Figure:
+	"""
+	Create the EtherType composition figure.
+
+	Purpose:
+	    Displays the share of captured Ethernet frames by outer EtherType.
+
+	Args:
+	    df_packets (pd.DataFrame): Data Link packet records.
+
+	Returns:
+	    go.Figure: EtherType composition chart.
+	"""
+	throw_if( 'df_packets', df_packets, )
+	df_values = (df_packets.groupby( 'ether_type_name' ).size( ).rename( 'frames' )
+		.reset_index( ))
+	figure = px.pie( df_values, names='ether_type_name', values='frames', hole=0.58,
+		color='ether_type_name', color_discrete_map=cfg.ETHER_TYPE_COLORS,
+		category_orders={ 'ether_type_name': cfg.ETHER_TYPE_ORDER, }, )
+	figure.update_layout( title='EtherType Composition', uirevision='data-link-ether-types', )
+	return configure_figure( figure, cfg.SUMMARY_CHART_HEIGHT, False, )
+
+
+def create_data_link_bar( df_packets: pd.DataFrame, column_name: str,
+	title: str, ) -> go.Figure:
+	"""
+	Create a ranked Data Link figure.
+
+	Purpose:
+	    Ranks nonempty Layer 2 values by captured frame count.
+
+	Args:
+	    df_packets (pd.DataFrame): Data Link packet records.
+	    column_name (str): Column used for ranking.
+	    title (str): Figure title.
+
+	Returns:
+	    go.Figure: Ranked horizontal bar chart.
+	"""
+	throw_if( 'df_packets', df_packets, )
+	throw_if( 'column_name', column_name, )
+	throw_if( 'title', title, )
+	df_values = df_packets[ df_packets[ column_name ].fillna( '' ).astype( str ).str.len( ) > 0 ]
+	df_values = (df_values.groupby( column_name ).size( ).rename( 'frames' ).reset_index( )
+		.nlargest( cfg.TOP_MAC_ADDRESS_LIMIT, 'frames', ).sort_values( 'frames' ))
+	figure = go.Figure( data=[ go.Bar( x=df_values[ 'frames' ], y=df_values[ column_name ],
+		orientation='h', marker={ 'color': cfg.ACCENT_BLUE, }, text=df_values[ 'frames' ],
+		textposition='outside', ) ] )
+	figure.update_layout( title=title, xaxis_title='Frames', yaxis_title='', uirevision=title, )
+	return configure_figure( figure, cfg.SUMMARY_CHART_HEIGHT, False, )
+
+
+def create_frame_class_chart( df_packets: pd.DataFrame, ) -> go.Figure:
+	"""
+	Create the frame-class figure.
+
+	Purpose:
+	    Compares unicast, multicast, and broadcast Ethernet frame activity.
+
+	Args:
+	    df_packets (pd.DataFrame): Data Link packet records.
+
+	Returns:
+	    go.Figure: Frame-class bar chart.
+	"""
+	throw_if( 'df_packets', df_packets, )
+	df_values = (df_packets.groupby( 'frame_class' ).size( ).rename( 'frames' ).reset_index( ))
+	figure = px.bar( df_values, x='frame_class', y='frames', color='frame_class',
+		color_discrete_map=cfg.FRAME_CLASS_COLORS,
+		category_orders={ 'frame_class': cfg.FRAME_CLASS_ORDER, }, )
+	figure.update_layout( title='Frame Classification', xaxis_title='Frame Class',
+		yaxis_title='Frames', uirevision='data-link-frame-class', )
+	return configure_figure( figure, cfg.SUMMARY_CHART_HEIGHT, False, )
+
+
+def create_arp_chart( df_packets: pd.DataFrame, ) -> go.Figure:
+	"""
+	Create the ARP operation figure.
+
+	Purpose:
+	    Compares ARP request, reply, and other operation counts.
+
+	Args:
+	    df_packets (pd.DataFrame): Data Link packet records.
+
+	Returns:
+	    go.Figure: ARP operation bar chart.
+	"""
+	throw_if( 'df_packets', df_packets, )
+	df_values = df_packets[ df_packets[ 'arp_operation' ].astype( str ).str.len( ) > 0 ]
+	df_values = (df_values.groupby( 'arp_operation' ).size( ).rename( 'frames' ).reset_index( ))
+	figure = px.bar( df_values, x='arp_operation', y='frames', color='arp_operation',
+		color_discrete_map=cfg.ARP_OPERATION_COLORS,
+		category_orders={ 'arp_operation': cfg.ARP_OPERATION_ORDER, }, )
+	figure.update_layout( title='ARP Operations', xaxis_title='Operation', yaxis_title='Frames',
+		uirevision='data-link-arp', )
+	return configure_figure( figure, cfg.SUMMARY_CHART_HEIGHT, False, )
+
+
+def create_data_link_timeline( df_packets: pd.DataFrame, ) -> go.Figure:
+	"""
+	Create Data Link activity over time.
+
+	Purpose:
+	    Displays one-second unicast, multicast, and broadcast frame rates across the active
+	    rolling analysis window.
+
+	Args:
+	    df_packets (pd.DataFrame): Data Link packet records.
+
+	Returns:
+	    go.Figure: Data Link activity timeline.
+	"""
+	throw_if( 'df_packets', df_packets, )
+	df_time = df_packets.dropna( subset=[ 'timestamp', ] ).copy( )
+	if df_time.empty:
+		return configure_figure( go.Figure( ), cfg.SUMMARY_CHART_HEIGHT, False, )
+	current_time = df_time[ 'timestamp' ].max( )
+	start_time = current_time - pd.Timedelta( seconds=cfg.TRAFFIC_WINDOW_SECONDS )
+	df_time = (df_time[ df_time[ 'timestamp' ] >= start_time ].set_index( 'timestamp' )
+		.groupby( 'frame_class' ).resample( '1s' ).size( ).rename( 'frames' ).reset_index( ))
+	figure = px.area( df_time, x='timestamp', y='frames', color='frame_class',
+		color_discrete_map=cfg.FRAME_CLASS_COLORS,
+		category_orders={ 'frame_class': cfg.FRAME_CLASS_ORDER, }, )
+	figure.update_layout( title='Data Link Activity Over Time', xaxis_title='Time',
+		yaxis_title='Frames / Second', uirevision='data-link-timeline', )
+	return configure_figure( figure, cfg.SUMMARY_CHART_HEIGHT, True, )
+
+
+def create_mac_ip_figure( df_packets: pd.DataFrame, ) -> go.Figure:
+	"""
+	Create a MAC-to-IP relationship figure.
+
+	Purpose:
+	    Displays the strongest observed source MAC-to-source IP bindings as a Sankey
+	    diagram for endpoint correlation and duplicate-IP investigation.
+
+	Args:
+	    df_packets (pd.DataFrame): Data Link packet records.
+
+	Returns:
+	    go.Figure: MAC-to-IP relationship Sankey diagram.
+	"""
+	throw_if( 'df_packets', df_packets, )
+	df_bindings = df_packets.dropna( subset=[ 'src_ip', ] ).copy( )
+	df_bindings = df_bindings[ df_bindings[ 'src_mac' ].astype( str ).str.len( ) > 0 ]
+	df_bindings = (df_bindings.groupby( [ 'src_mac', 'src_ip', ] ).size( ).rename( 'frames' )
+		.reset_index( ).sort_values( 'frames', ascending=False, )
+		.head( cfg.TOP_MAC_IP_RELATIONSHIP_LIMIT ))
+	if df_bindings.empty:
+		return configure_figure( go.Figure( ), cfg.FLOW_CHART_HEIGHT, False, )
+	mac_labels = [ f'MAC: {value}' for value in sorted( df_bindings[ 'src_mac' ].unique( ) ) ]
+	ip_labels = [ f'IP: {value}' for value in sorted( df_bindings[ 'src_ip' ].unique( ) ) ]
+	labels = mac_labels + ip_labels
+	indexes = { label: index for index, label in enumerate( labels ) }
+	figure = go.Figure( go.Sankey(
+		node={ 'label': labels, 'pad': 16, 'thickness': 15,
+			'color': [ cfg.ACCENT_BLUE ] * len( mac_labels ) + [ cfg.GREEN ] * len( ip_labels ), },
+		link={
+			'source': [ indexes[ f'MAC: {value}' ] for value in df_bindings[ 'src_mac' ] ],
+			'target': [ indexes[ f'IP: {value}' ] for value in df_bindings[ 'src_ip' ] ],
+			'value': df_bindings[ 'frames' ],
+			'color': 'rgba( 0, 120, 252, 0.28 )',
+		},
+	) )
+	figure.update_layout( title='MAC-to-IP Relationships', uirevision='data-link-mac-ip', )
+	return configure_figure( figure, cfg.FLOW_CHART_HEIGHT, False, )
+
+
+def create_arp_matrix_figure( df_packets: pd.DataFrame, ) -> go.Figure:
+	"""
+	Create an ARP sender-to-target matrix.
+
+	Purpose:
+	    Displays concentration among observed ARP sender and target IPv4 addresses.
+
+	Args:
+	    df_packets (pd.DataFrame): Data Link packet records.
+
+	Returns:
+	    go.Figure: ARP relationship heatmap.
+	"""
+	throw_if( 'df_packets', df_packets, )
+	df_arp = df_packets[
+		(df_packets[ 'arp_sender_ip' ].astype( str ).str.len( ) > 0) &
+		(df_packets[ 'arp_target_ip' ].astype( str ).str.len( ) > 0)
+	]
+	if df_arp.empty:
+		return configure_figure( go.Figure( ), cfg.SUMMARY_CHART_HEIGHT, False, )
+	df_matrix = (df_arp.groupby( [ 'arp_sender_ip', 'arp_target_ip', ] ).size( )
+		.rename( 'frames' ).reset_index( ).sort_values( 'frames', ascending=False, )
+		.head( cfg.TOP_ARP_RELATIONSHIP_LIMIT ).pivot( index='arp_sender_ip',
+			columns='arp_target_ip', values='frames', ).fillna( 0 ))
+	figure = go.Figure( go.Heatmap( z=df_matrix.values, x=df_matrix.columns,
+		y=df_matrix.index, colorscale='Blues', colorbar={ 'title': 'Frames', }, ) )
+	figure.update_layout( title='ARP Sender → Target Matrix', xaxis_title='Target IP',
+		yaxis_title='Sender IP', uirevision='data-link-arp-matrix', )
+	return configure_figure( figure, cfg.SUMMARY_CHART_HEIGHT, False, )
+
+
+def prepare_data_link_editor( df_packets: pd.DataFrame, ) -> pd.DataFrame:
+	"""
+	Prepare Data Link records for display.
+
+	Purpose:
+	    Orders and limits Layer 2 packet records for the read-only frame editor.
+
+	Args:
+	    df_packets (pd.DataFrame): Data Link packet records.
+
+	Returns:
+	    pd.DataFrame: Display-ready Data Link records.
+	"""
+	throw_if( 'df_packets', df_packets, )
+	columns = [ 'timestamp', 'src_mac', 'dst_mac', 'ether_type_name',
+		'inner_ether_type_name', 'frame_class', 'vlan_id', 'vlan_priority',
+		'arp_operation', 'arp_sender_ip', 'arp_target_ip', 'length', 'session', ]
+	return (df_packets.sort_values( 'timestamp', ascending=False, )
+		.head( cfg.PACKET_EDITOR_ROW_LIMIT )[ columns ])
+
+# ==========================================================================================
 # Thread State Maintenance
 # ==========================================================================================
 current_thread = (st.session_state.live_thread)
@@ -1294,10 +2119,6 @@ if capture_error:
 	st.session_state.running = False
 	stop_capture_thread( )
 
-# ------------------------------------------------------------------------------------------
-# Streamlit Configuration
-# ------------------------------------------------------------------------------------------
-st.set_page_config( page_title='Sloppy Joe', page_icon=cfg.ICON, layout='wide', )
 st.logo( cfg.LOGO, size='large', )
 
 # ==========================================================================================
@@ -1388,17 +2209,72 @@ with st.sidebar:
 	# Expander - Sidebar Filters
 	# ----------------------------------------------------
 	st.markdown( cfg.BLUE_DIVIDER, unsafe_allow_html=True, )
-	
+	proto_filter = cfg.PROTOCOL_ORDER.copy( )
+	port_range = (0, 65535,)
+	ether_type_filter = cfg.ETHER_TYPE_ORDER.copy( )
+	frame_class_filter = cfg.FRAME_CLASS_ORDER.copy( )
+	ip_version_filter = cfg.IP_VERSION_ORDER.copy( )
+	address_scope_filter = cfg.ADDRESS_SCOPE_ORDER.copy( )
+	transport_protocol_filter = [ 'TCP', 'UDP', ]
+	session_direction_filter = [ 'Bidirectional', 'One-Way', ]
+	minimum_session_duration = 0.0
+	tls_version_filter = cfg.TLS_VERSION_ORDER.copy( )
+	tls_handshake_filter = cfg.TLS_HANDSHAKE_ORDER.copy( )
+	application_protocol_filter = cfg.APPLICATION_PROTOCOL_ORDER.copy( )
+	dns_query_type_filter = cfg.DNS_QUERY_TYPE_ORDER.copy( )
+	http_method_filter = cfg.HTTP_METHOD_ORDER.copy( )
+
 	with st.expander( label='Filters', expanded=False, ):
-		proto_filter = st.multiselect( 'Protocols', options=cfg.PROTOCOL_ORDER,
-			default=cfg.PROTOCOL_ORDER, )
-		
+		if analysis_mode == cfg.ANALYSIS_MODE_DATA_LINK:
+			ether_type_filter = st.multiselect( 'EtherTypes', options=cfg.ETHER_TYPE_ORDER,
+				default=cfg.ETHER_TYPE_ORDER, )
+			st.divider( )
+			frame_class_filter = st.multiselect( 'Frame Classification',
+				options=cfg.FRAME_CLASS_ORDER, default=cfg.FRAME_CLASS_ORDER, )
+		elif analysis_mode == cfg.ANALYSIS_MODE_NETWORK_LAYER:
+			ip_version_filter = st.multiselect( 'IP Version', options=cfg.IP_VERSION_ORDER,
+				default=cfg.IP_VERSION_ORDER, )
+			st.divider( )
+			address_scope_filter = st.multiselect( 'Destination Address Scope',
+				options=cfg.ADDRESS_SCOPE_ORDER, default=cfg.ADDRESS_SCOPE_ORDER, )
+		elif analysis_mode == cfg.ANALYSIS_MODE_TRANSPORT:
+			transport_protocol_filter = st.multiselect( 'Transport Protocols',
+				options=[ 'TCP', 'UDP', ], default=[ 'TCP', 'UDP', ], )
+			st.divider( )
+			port_range = st.slider( 'Destination Port Range', 0, 65535, (0, 65535,), )
+		elif analysis_mode == cfg.ANALYSIS_MODE_SESSION:
+			transport_protocol_filter = st.multiselect( 'Session Protocols',
+				options=[ 'TCP', 'UDP', 'ICMP', 'ICMPv6', ],
+				default=[ 'TCP', 'UDP', 'ICMP', 'ICMPv6', ], )
+			st.divider( )
+			session_direction_filter = st.multiselect( 'Directionality',
+				options=[ 'Bidirectional', 'One-Way', ],
+				default=[ 'Bidirectional', 'One-Way', ], )
+			st.divider( )
+			minimum_session_duration = st.number_input( 'Minimum Duration — Seconds',
+				min_value=0.0, value=0.0, step=0.1, )
+		elif analysis_mode == cfg.ANALYSIS_MODE_PRESENTATION:
+			tls_version_filter = st.multiselect( 'TLS Versions', options=cfg.TLS_VERSION_ORDER,
+				default=cfg.TLS_VERSION_ORDER, )
+			st.divider( )
+			tls_handshake_filter = st.multiselect( 'TLS Handshake Types',
+				options=cfg.TLS_HANDSHAKE_ORDER, default=cfg.TLS_HANDSHAKE_ORDER, )
+		elif analysis_mode == cfg.ANALYSIS_MODE_APPLICATION:
+			application_protocol_filter = st.multiselect( 'Application Protocols',
+				options=cfg.APPLICATION_PROTOCOL_ORDER,
+				default=cfg.APPLICATION_PROTOCOL_ORDER, )
+			st.divider( )
+			dns_query_type_filter = st.multiselect( 'DNS Query Types',
+				options=cfg.DNS_QUERY_TYPE_ORDER, default=cfg.DNS_QUERY_TYPE_ORDER, )
+			st.divider( )
+			http_method_filter = st.multiselect( 'HTTP Methods', options=cfg.HTTP_METHOD_ORDER,
+				default=cfg.HTTP_METHOD_ORDER, )
+		else:
+			proto_filter = st.multiselect( 'Protocols', options=cfg.PROTOCOL_ORDER,
+				default=cfg.PROTOCOL_ORDER, )
+			st.divider( )
+			port_range = st.slider( 'Destination Port Range', 0, 65535, (0, 65535,), )
 		st.divider( )
-		
-		port_range = st.slider( 'Destination Port Range', 0, 65535, (0, 65535,), )
-		
-		st.divider( )
-		
 		window_size = st.slider( 'Rolling Window (Packets)', 50, 2000, 500, 50, )
 
 # ==========================================================================================
@@ -1569,7 +2445,6 @@ def render_packet_analysis( protocols: List[ str ], destination_ports: tuple[ in
 				key='top-destination-chart', )
 		
 		st.markdown( cfg.BLUE_DIVIDER, unsafe_allow_html=True, )
-		
 	else:
 		empty_left, empty_right = st.columns( 2, border=True, )
 		
@@ -1592,6 +2467,7 @@ def render_packet_analysis( protocols: List[ str ], destination_ports: tuple[ in
 	
 	if not df_packets.empty:
 		df_packet_editor = prepare_packet_editor( df_packets )
+		
 		st.data_editor( df_packet_editor, disabled=True, hide_index=True, use_container_width=True,
 			height=cfg.PACKET_EDITOR_HEIGHT,
 			column_order=[ 'timestamp', 'protocol', 'src_ip', 'src_port', 'dst_ip', 'dst_port',
@@ -1794,117 +2670,753 @@ def render_flow_analysis( protocols: List[ str ], destination_ports: tuple[ int,
 	st.markdown( cfg.BLUE_DIVIDER, unsafe_allow_html=True, )
 
 # ==========================================================================================
-# Analysis Mode Placeholders
+# Data Link Analysis Fragment
 # ==========================================================================================
 
-def render_analysis_placeholder( title: str, layer: str, description: str, ) -> None:
+@st.fragment( run_every=ANALYSIS_REFRESH_INTERVAL )
+def render_data_link_analysis( ether_types: List[ str ], frame_classes: List[ str ], ) -> None:
 	"""
-	Render an analysis-mode placeholder.
+	Render Data Link analysis.
 
 	Purpose:
-	    Provides a stable mode-specific interface while the corresponding OSI analysis
-	    implementation is introduced in a later phase.
+	    Displays Ethernet composition, MAC endpoints, frame classes, ARP relationships,
+	    VLAN activity, MAC-to-IP bindings, timelines, and Layer 2 frame records.
 
 	Args:
-	    title (str): Analysis-mode title.
-	    layer (str): OSI layer represented by the mode.
-	    description (str): Planned analytical scope.
+	    ether_types (List[str]): Included outer EtherType names.
+	    frame_classes (List[str]): Included frame classifications.
 
 	Returns:
-	    None: This function renders Streamlit components.
+	    None: This function renders Data Link analysis.
 	"""
-	throw_if( 'title', title, )
-	
-	throw_if( 'layer', layer, )
-	
-	throw_if( 'description', description, )
-	
-	st.markdown( f'## {title}' )
-	
-	st.caption( layer )
-	
-	with st.container( border=True, ):
-		st.info( description )
-		
-		if st.session_state.running:
-			st.success( f'Packet capture remains active in {st.session_state.capture_mode} mode.' )
-		else:
-			st.caption(
-				'Start packet capture from the Controls expander to begin collecting data.' )
-	
+	throw_if( 'ether_types', ether_types, )
+	throw_if( 'frame_classes', frame_classes, )
+	df_packets = create_data_link_snapshot( st.session_state.packets, ether_types, frame_classes, )
+	st.markdown( '## Data Link Analysis' )
+	st.caption( 'OSI Layer 2 • Ethernet • MAC • EtherType • ARP • VLAN • Broadcast • Multicast' )
+	m1, m2, m3, m4, m5, m6 = st.columns( 6 )
+	m1.metric( 'Frames', f'{len( df_packets ):,}' )
+	m2.metric( 'Source MACs', f"{df_packets[ 'src_mac' ].replace( '', pd.NA ).nunique( ):,}" if not df_packets.empty else '0' )
+	m3.metric( 'Destination MACs', f"{df_packets[ 'dst_mac' ].replace( '', pd.NA ).nunique( ):,}" if not df_packets.empty else '0' )
+	m4.metric( 'Broadcast', f"{int( df_packets[ 'is_broadcast' ].sum( ) ):,}" if not df_packets.empty else '0' )
+	m5.metric( 'Multicast', f"{int( df_packets[ 'is_multicast' ].sum( ) ):,}" if not df_packets.empty else '0' )
+	m6.metric( 'VLANs', f"{df_packets[ 'vlan_id' ].nunique( ):,}" if not df_packets.empty else '0' )
 	st.markdown( cfg.BLUE_DIVIDER, unsafe_allow_html=True, )
+	if df_packets.empty:
+		with st.container( height=cfg.SUMMARY_CHART_HEIGHT, border=True, ):
+			st.info( 'No Data Link records match the active filters.' )
+		return
+	left, right = st.columns( 2, gap='medium', border=True, )
+	with left:
+		st.plotly_chart( create_data_link_pie( df_packets ), use_container_width=True,
+			config=cfg.CHART_CONFIG, key='data-link-ether-types', )
+	with right:
+		st.plotly_chart( create_frame_class_chart( df_packets ), use_container_width=True,
+			config=cfg.CHART_CONFIG, key='data-link-frame-classes', )
+	st.markdown( cfg.BLUE_DIVIDER, unsafe_allow_html=True, )
+	left, right = st.columns( 2, gap='medium', border=True, )
+	with left:
+		st.plotly_chart( create_data_link_bar( df_packets, 'src_mac',
+			'Top Source MAC Addresses', ), use_container_width=True,
+			config=cfg.CHART_CONFIG, key='data-link-source-macs', )
+	with right:
+		st.plotly_chart( create_data_link_bar( df_packets, 'dst_mac',
+			'Top Destination MAC Addresses', ), use_container_width=True,
+			config=cfg.CHART_CONFIG, key='data-link-destination-macs', )
+	st.markdown( cfg.BLUE_DIVIDER, unsafe_allow_html=True, )
+	left, right = st.columns( 2, gap='medium', border=True, )
+	with left:
+		st.plotly_chart( create_arp_chart( df_packets ), use_container_width=True,
+			config=cfg.CHART_CONFIG, key='data-link-arp', )
+	with right:
+		st.plotly_chart( create_data_link_timeline( df_packets ), use_container_width=True,
+			config=cfg.CHART_CONFIG, key='data-link-timeline', )
+	st.markdown( cfg.BLUE_DIVIDER, unsafe_allow_html=True, )
+	left, right = st.columns( 2, gap='medium', border=True, )
+	with left:
+		st.plotly_chart( create_arp_matrix_figure( df_packets ), use_container_width=True,
+			config=cfg.CHART_CONFIG, key='data-link-arp-matrix', )
+	with right:
+		st.plotly_chart( create_category_figure( df_packets, 'vlan_id', 'VLAN Activity' ),
+			use_container_width=True, config=cfg.CHART_CONFIG, key='data-link-vlan', )
+	st.markdown( cfg.BLUE_DIVIDER, unsafe_allow_html=True, )
+	st.plotly_chart( create_category_figure( df_packets, 'vlan_priority', 'VLAN Priority Activity' ),
+		use_container_width=True, config=cfg.CHART_CONFIG, key='data-link-vlan-priority', )
+	st.markdown( cfg.BLUE_DIVIDER, unsafe_allow_html=True, )
+	st.plotly_chart( create_mac_ip_figure( df_packets ), use_container_width=True,
+		config=cfg.CHART_CONFIG, key='data-link-mac-ip', )
+	st.markdown( cfg.BLUE_DIVIDER, unsafe_allow_html=True, )
+	st.markdown( '<div class="sloppy-section-title">Data Link Frame Stream</div>'
+		'<div class="sloppy-section-caption">Most recent Layer 2 records matching the active filters.</div>',
+		unsafe_allow_html=True, )
+	st.data_editor( prepare_data_link_editor( df_packets ), disabled=True, hide_index=True,
+		use_container_width=True, height=cfg.PACKET_EDITOR_HEIGHT, key='data-link-editor', )
+	st.markdown( cfg.BLUE_DIVIDER, unsafe_allow_html=True, )
+
+
+# ==========================================================================================
+# Additional OSI Analysis Modes
+# ==========================================================================================
+
+def create_complete_snapshot( packets: List[ Dict ], ) -> pd.DataFrame:
+	"""
+	Create a complete packet snapshot.
+
+	Purpose:
+	    Converts retained packet dictionaries into a typed DataFrame used by the additional
+	    OSI analysis modes without modifying session-state data.
+
+	Args:
+	    packets (List[Dict]): Retained normalized packet records.
+
+	Returns:
+	    pd.DataFrame: Complete packet snapshot.
+	"""
+	throw_if( 'packets', packets, )
+	df_packets = pd.DataFrame( packets )
+	if df_packets.empty:
+		return df_packets
+	df_packets[ 'timestamp' ] = pd.to_datetime( df_packets[ 'timestamp' ], errors='coerce', )
+	return df_packets.copy( )
+
+
+def create_category_figure( df_packets: pd.DataFrame, column_name: str,
+	title: str, ) -> go.Figure:
+	"""
+	Create a categorical count figure.
+
+	Purpose:
+	    Ranks nonempty categorical values by packet count using a deterministic horizontal
+	    bar chart.
+
+	Args:
+	    df_packets (pd.DataFrame): Packet or conversation records.
+	    column_name (str): Column containing category values.
+	    title (str): Figure title.
+
+	Returns:
+	    go.Figure: Configured categorical count figure.
+	"""
+	throw_if( 'df_packets', df_packets, )
+	throw_if( 'column_name', column_name, )
+	throw_if( 'title', title, )
+	if column_name not in df_packets.columns:
+		return configure_figure( go.Figure( ), cfg.SUMMARY_CHART_HEIGHT, False, )
+	df_values = df_packets.copy( )
+	df_values[ column_name ] = df_values[ column_name ].fillna( '' ).astype( str ).str.strip( )
+	df_values.loc[ df_values[ column_name ] == '', column_name ] = 'Unknown'
+	df_values = (df_values.groupby( column_name ).size( ).rename( 'packets' ).reset_index( )
+		.sort_values( [ 'packets', column_name, ], ascending=[ True, True, ] ).tail( 15 ))
+	figure = go.Figure( go.Bar( x=df_values[ 'packets' ], y=df_values[ column_name ],
+		orientation='h', marker={ 'color': cfg.ACCENT_BLUE, }, text=df_values[ 'packets' ],
+		textposition='outside', ) )
+	figure.update_layout( title=title, xaxis_title='Packet Count', yaxis_title='',
+		uirevision=title, )
+	return configure_figure( figure, cfg.SUMMARY_CHART_HEIGHT, False, )
+
+
+def create_numeric_histogram( df_packets: pd.DataFrame, column_name: str,
+	title: str, ) -> go.Figure:
+	"""
+	Create a numeric distribution figure.
+
+	Purpose:
+	    Displays the frequency distribution of a numeric packet or conversation member.
+
+	Args:
+	    df_packets (pd.DataFrame): Packet or conversation records.
+	    column_name (str): Numeric column to analyze.
+	    title (str): Figure title.
+
+	Returns:
+	    go.Figure: Configured histogram.
+	"""
+	throw_if( 'df_packets', df_packets, )
+	throw_if( 'column_name', column_name, )
+	throw_if( 'title', title, )
+	if column_name not in df_packets.columns:
+		return configure_figure( go.Figure( ), cfg.SUMMARY_CHART_HEIGHT, False, )
+	df_values = df_packets.copy( )
+	df_values[ column_name ] = pd.to_numeric( df_values[ column_name ], errors='coerce', )
+	df_values = df_values.dropna( subset=[ column_name ] )
+	figure = go.Figure( go.Histogram( x=df_values[ column_name ], nbinsx=30,
+		marker={ 'color': cfg.CYAN, }, ) )
+	figure.update_layout( title=title,
+		xaxis_title=column_name.replace( '_', ' ' ).title( ), yaxis_title='Frequency',
+		uirevision=title, )
+	return configure_figure( figure, cfg.SUMMARY_CHART_HEIGHT, False, )
+
+
+def create_timeline_figure( df_packets: pd.DataFrame, category_column: str,
+	title: str, ) -> go.Figure:
+	"""
+	Create a packet-activity timeline.
+
+	Purpose:
+	    Aggregates packet records into one-second intervals by a selected category.
+
+	Args:
+	    df_packets (pd.DataFrame): Packet records.
+	    category_column (str): Category used to split the timeline.
+	    title (str): Figure title.
+
+	Returns:
+	    go.Figure: Configured time-series figure.
+	"""
+	throw_if( 'df_packets', df_packets, )
+	throw_if( 'category_column', category_column, )
+	throw_if( 'title', title, )
+	if df_packets.empty or category_column not in df_packets.columns:
+		return configure_figure( go.Figure( ), cfg.SUMMARY_CHART_HEIGHT, False, )
+	df_time = df_packets.dropna( subset=[ 'timestamp', category_column, ] ).copy( )
+	if df_time.empty:
+		return configure_figure( go.Figure( ), cfg.SUMMARY_CHART_HEIGHT, False, )
+	df_time[ 'timestamp' ] = pd.to_datetime( df_time[ 'timestamp' ], errors='coerce', )
+	df_time = (df_time.set_index( 'timestamp' ).groupby( category_column ).resample( '1s' )
+		.size( ).rename( 'packets' ).reset_index( ))
+	figure = px.line( df_time, x='timestamp', y='packets', color=category_column, markers=True, )
+	figure.update_layout( title=title, xaxis_title='Time', yaxis_title='Packets / Second',
+		hovermode='x unified', uirevision=title, )
+	return configure_figure( figure, cfg.SUMMARY_CHART_HEIGHT, True, )
+
+
+def render_mode_editor( df_packets: pd.DataFrame, columns: List[ str ], key: str, ) -> None:
+	"""
+	Render a mode-specific data editor.
+
+	Purpose:
+	    Displays the most recent packet or conversation records using only the columns
+	    relevant to the selected analysis mode.
+
+	Args:
+	    df_packets (pd.DataFrame): Packet or conversation records.
+	    columns (List[str]): Ordered editor columns.
+	    key (str): Unique Streamlit widget key.
+
+	Returns:
+	    None: This function renders a read-only data editor.
+	"""
+	throw_if( 'df_packets', df_packets, )
+	throw_if( 'columns', columns, )
+	throw_if( 'key', key, )
+	if df_packets.empty:
+		with st.container( height=cfg.PACKET_EDITOR_HEIGHT, border=True, ):
+			st.info( 'No records are available for the active filters.' )
+		return
+	existing_columns = [ column for column in columns if column in df_packets.columns ]
+	sort_column = 'timestamp' if 'timestamp' in df_packets.columns else 'first_seen'
+	df_editor = (df_packets.sort_values( sort_column, ascending=False, )
+		.head( cfg.PACKET_EDITOR_ROW_LIMIT ))
+	st.data_editor( df_editor[ existing_columns ], disabled=True, hide_index=True,
+		use_container_width=True, height=cfg.PACKET_EDITOR_HEIGHT, key=key, )
+
+
+def create_subnet_matrix_figure( df_packets: pd.DataFrame, ) -> go.Figure:
+	"""
+	Create a source-subnet to destination-subnet matrix.
+
+	Purpose:
+	    Aggregates IPv4 traffic into /24 networks and IPv6 traffic into /64 networks to
+	    reveal routed communication concentration.
+
+	Args:
+	    df_packets (pd.DataFrame): Network Layer packet records.
+
+	Returns:
+	    go.Figure: Subnet relationship heatmap.
+	"""
+	throw_if( 'df_packets', df_packets, )
+	rows: List[ Dict ] = [ ]
+	for packet in df_packets.dropna( subset=[ 'src_ip', 'dst_ip', ] ).itertuples( ):
+		try:
+			source = ipaddress.ip_address( packet.src_ip )
+			destination = ipaddress.ip_address( packet.dst_ip )
+			source_prefix = 24 if source.version == 4 else 64
+			destination_prefix = 24 if destination.version == 4 else 64
+			rows.append( {
+				'source_subnet': str( ipaddress.ip_network( f'{source}/{source_prefix}', strict=False, ) ),
+				'destination_subnet': str( ipaddress.ip_network( f'{destination}/{destination_prefix}', strict=False, ) ),
+			} )
+		except ValueError:
+			continue
+	df_rows = pd.DataFrame( rows )
+	if df_rows.empty:
+		return configure_figure( go.Figure( ), cfg.FLOW_CHART_HEIGHT, False, )
+	df_matrix = (df_rows.groupby( [ 'source_subnet', 'destination_subnet', ] ).size( )
+		.rename( 'packets' ).reset_index( ).sort_values( 'packets', ascending=False, )
+		.head( cfg.TOP_SUBNET_RELATIONSHIP_LIMIT ).pivot( index='source_subnet',
+			columns='destination_subnet', values='packets', ).fillna( 0 ))
+	figure = go.Figure( go.Heatmap( z=df_matrix.values, x=df_matrix.columns,
+		y=df_matrix.index, colorscale='Blues', colorbar={ 'title': 'Packets', }, ) )
+	figure.update_layout( title='Source Subnet → Destination Subnet',
+		xaxis_title='Destination Subnet', yaxis_title='Source Subnet',
+		uirevision='network-subnet-matrix', )
+	return configure_figure( figure, cfg.FLOW_CHART_HEIGHT, False, )
+
+
+
+
+
+
+@st.fragment( run_every=ANALYSIS_REFRESH_INTERVAL )
+def render_network_layer_analysis( ip_versions: List[ int ], address_scopes: List[ str ], ) -> None:
+	"""
+	Render Network Layer analysis.
+
+	Purpose:
+	    Displays IPv4 and IPv6 composition, TTL and hop-limit behavior, DSCP and ECN,
+	    fragmentation, ICMP activity, address scopes, subnet relationships, and packet data.
+
+	Args:
+	    ip_versions (List[int]): Included IP versions.
+	    address_scopes (List[str]): Included destination address scopes.
+
+	Returns:
+	    None: This function renders Network Layer analysis.
+	"""
+	throw_if( 'ip_versions', ip_versions, )
+	throw_if( 'address_scopes', address_scopes, )
+	df_packets = create_complete_snapshot( st.session_state.packets, )
+	if not df_packets.empty:
+		df_packets = df_packets[ df_packets[ 'ip_version' ].isin( ip_versions ) &
+			df_packets[ 'address_scope' ].isin( address_scopes ) ]
+	st.markdown( '## Network Layer Analysis' )
+	st.caption( 'OSI Layer 3 • IPv4 • IPv6 • TTL • Hop Limit • DSCP • ECN • Fragmentation • ICMP' )
+	m1, m2, m3, m4, m5, m6 = st.columns( 6 )
+	m1.metric( 'Packets', f'{len( df_packets ):,}' )
+	m2.metric( 'IPv4', f"{int( (df_packets[ 'ip_version' ] == 4).sum( ) ):,}" if not df_packets.empty else '0' )
+	m3.metric( 'IPv6', f"{int( (df_packets[ 'ip_version' ] == 6).sum( ) ):,}" if not df_packets.empty else '0' )
+	m4.metric( 'Source IPs', f"{df_packets[ 'src_ip' ].nunique( ):,}" if not df_packets.empty else '0' )
+	m5.metric( 'Fragments', f"{int( df_packets[ 'is_fragmented' ].fillna( False ).sum( ) ):,}" if not df_packets.empty else '0' )
+	m6.metric( 'ICMP / ICMPv6', f"{int( df_packets[ 'protocol' ].isin( [ 'ICMP', 'ICMPv6', ] ).sum( ) ):,}" if not df_packets.empty else '0' )
+	st.markdown( cfg.BLUE_DIVIDER, unsafe_allow_html=True, )
+	if df_packets.empty:
+		st.info( 'No Network Layer records match the active filters.' )
+		return
+	left, right = st.columns( 2, gap='medium', border=True, )
+	with left:
+		st.plotly_chart( create_category_figure( df_packets, 'ip_version', 'IP Version Composition' ),
+			use_container_width=True, config=cfg.CHART_CONFIG, key='l3-ip-version', )
+	with right:
+		df_hops = df_packets.copy( )
+		df_hops[ 'effective_hop_limit' ] = df_hops[ 'ttl' ].fillna( df_hops[ 'hop_limit' ] )
+		st.plotly_chart( create_numeric_histogram( df_hops, 'effective_hop_limit',
+			'TTL / Hop-Limit Distribution' ), use_container_width=True,
+			config=cfg.CHART_CONFIG, key='l3-hop-limit', )
+	st.markdown( cfg.BLUE_DIVIDER, unsafe_allow_html=True, )
+	left, right = st.columns( 2, gap='medium', border=True, )
+	with left:
+		st.plotly_chart( create_category_figure( df_packets, 'address_scope',
+			'Destination Address Scope' ), use_container_width=True,
+			config=cfg.CHART_CONFIG, key='l3-scope', )
+	with right:
+		st.plotly_chart( create_category_figure( df_packets, 'dscp', 'DSCP Activity' ),
+			use_container_width=True, config=cfg.CHART_CONFIG, key='l3-dscp', )
+	st.markdown( cfg.BLUE_DIVIDER, unsafe_allow_html=True, )
+	st.plotly_chart( create_category_figure( df_packets, 'ecn', 'ECN Activity' ),
+		use_container_width=True, config=cfg.CHART_CONFIG, key='l3-ecn', )
+	st.markdown( cfg.BLUE_DIVIDER, unsafe_allow_html=True, )
+	left, right = st.columns( 2, gap='medium', border=True, )
+	with left:
+		st.plotly_chart( create_timeline_figure( df_packets, 'is_fragmented',
+			'Fragmentation Activity Over Time' ), use_container_width=True,
+			config=cfg.CHART_CONFIG, key='l3-fragment-timeline', )
+	with right:
+		df_icmp = df_packets[ df_packets[ 'protocol' ].isin( [ 'ICMP', 'ICMPv6', ] ) ]
+		st.plotly_chart( create_category_figure( df_icmp, 'icmp_type', 'ICMP Type Activity' ),
+			use_container_width=True, config=cfg.CHART_CONFIG, key='l3-icmp-types', )
+	st.markdown( cfg.BLUE_DIVIDER, unsafe_allow_html=True, )
+	st.plotly_chart( create_subnet_matrix_figure( df_packets ), use_container_width=True,
+		config=cfg.CHART_CONFIG, key='l3-subnet-matrix', )
+	st.markdown( cfg.BLUE_DIVIDER, unsafe_allow_html=True, )
+	render_mode_editor( df_packets, [ 'timestamp', 'ip_version', 'src_ip', 'dst_ip', 'ttl',
+		'hop_limit', 'ipv6_flow_label', 'dscp', 'ecn', 'ip_identification', 'ip_flags',
+		'fragment_offset', 'ipv6_fragment_id', 'ipv6_more_fragments',
+		'ipv6_fragment_next_header', 'is_fragmented', 'icmp_type', 'icmp_code', 'address_scope',
+		'length', ], 'network-layer-editor', )
+
+
+@st.fragment( run_every=ANALYSIS_REFRESH_INTERVAL )
+def render_transport_analysis( protocols: List[ str ], destination_ports: tuple[ int, int ], ) -> None:
+	"""
+	Render Transport Layer analysis.
+
+	Purpose:
+	    Displays TCP and UDP composition, flags, windows, source and destination ports,
+	    sequencing indicators, lifecycle activity, and datagram lengths.
+
+	Args:
+	    protocols (List[str]): Included transport protocols.
+	    destination_ports (tuple[int, int]): Inclusive destination-port range.
+
+	Returns:
+	    None: This function renders Transport Layer analysis.
+	"""
+	throw_if( 'protocols', protocols, )
+	throw_if( 'destination_ports', destination_ports, )
+	df_packets = create_complete_snapshot( st.session_state.packets, )
+	if not df_packets.empty:
+		df_packets = df_packets[ df_packets[ 'protocol' ].isin( protocols ) ]
+		df_packets = df_packets[ df_packets[ 'dst_port' ].isna( ) | (
+			(df_packets[ 'dst_port' ] >= destination_ports[ 0 ]) &
+			(df_packets[ 'dst_port' ] <= destination_ports[ 1 ])) ]
+	df_packets = identify_transport_indicators( df_packets )
+	st.markdown( '## Transport Analysis' )
+	st.caption( 'OSI Layer 4 • TCP • UDP • Ports • Flags • Windows • Sequencing Indicators' )
+	m1, m2, m3, m4, m5, m6 = st.columns( 6 )
+	m1.metric( 'Packets', f'{len( df_packets ):,}' )
+	m2.metric( 'TCP', f"{int( (df_packets[ 'protocol' ] == 'TCP').sum( ) ):,}" if not df_packets.empty else '0' )
+	m3.metric( 'UDP', f"{int( (df_packets[ 'protocol' ] == 'UDP').sum( ) ):,}" if not df_packets.empty else '0' )
+	m4.metric( 'Possible Retransmissions', f"{int( df_packets[ 'possible_retransmission' ].sum( ) ):,}" if not df_packets.empty else '0' )
+	m5.metric( 'Duplicate ACKs', f"{int( df_packets[ 'duplicate_ack' ].sum( ) ):,}" if not df_packets.empty else '0' )
+	m6.metric( 'Out-of-Order', f"{int( df_packets[ 'out_of_order' ].sum( ) ):,}" if not df_packets.empty else '0' )
+	st.caption( 'Sequencing findings are indicators; capture loss and NIC offload can affect interpretation.' )
+	st.markdown( cfg.BLUE_DIVIDER, unsafe_allow_html=True, )
+	if df_packets.empty:
+		st.info( 'No Transport Layer records match the active filters.' )
+		return
+	left, right = st.columns( 2, gap='medium', border=True, )
+	with left:
+		st.plotly_chart( create_category_figure( df_packets, 'flags', 'TCP Flag Combinations' ),
+			use_container_width=True, config=cfg.CHART_CONFIG, key='l4-flags', )
+	with right:
+		st.plotly_chart( create_numeric_histogram( df_packets, 'tcp_window',
+			'TCP Window Distribution' ), use_container_width=True,
+			config=cfg.CHART_CONFIG, key='l4-window', )
+	st.markdown( cfg.BLUE_DIVIDER, unsafe_allow_html=True, )
+	left, right = st.columns( 2, gap='medium', border=True, )
+	with left:
+		st.plotly_chart( create_category_figure( df_packets, 'src_port', 'Top Source Ports' ),
+			use_container_width=True, config=cfg.CHART_CONFIG, key='l4-source-ports', )
+	with right:
+		st.plotly_chart( create_category_figure( df_packets, 'dst_port', 'Top Destination Ports' ),
+			use_container_width=True, config=cfg.CHART_CONFIG, key='l4-destination-ports', )
+	st.markdown( cfg.BLUE_DIVIDER, unsafe_allow_html=True, )
+	left, right = st.columns( 2, gap='medium', border=True, )
+	with left:
+		st.plotly_chart( create_timeline_figure( df_packets[ df_packets[ 'protocol' ] == 'TCP' ],
+			'flags', 'TCP Lifecycle Activity' ), use_container_width=True,
+			config=cfg.CHART_CONFIG, key='l4-lifecycle', )
+	with right:
+		st.plotly_chart( create_numeric_histogram( df_packets[ df_packets[ 'protocol' ] == 'UDP' ],
+			'udp_length', 'UDP Length Distribution' ), use_container_width=True,
+			config=cfg.CHART_CONFIG, key='l4-udp-length', )
+	st.markdown( cfg.BLUE_DIVIDER, unsafe_allow_html=True, )
+	render_mode_editor( df_packets, [ 'timestamp', 'protocol', 'src_ip', 'src_port', 'dst_ip',
+		'dst_port', 'flags', 'tcp_sequence', 'tcp_acknowledgment', 'tcp_window',
+		'tcp_header_length', 'udp_length', 'possible_retransmission', 'duplicate_ack',
+		'out_of_order', 'length', ], 'transport-editor', )
+
+
+@st.fragment( run_every=FLOW_REFRESH_INTERVAL )
+def render_session_analysis( protocols: List[ str ], directionality: List[ str ],
+	minimum_duration: float, ) -> None:
+	"""
+	Render Session Layer analysis.
+
+	Purpose:
+	    Displays bidirectional conversation duration, directional packets and bytes,
+	    connection lifecycle, volume, timelines, and conversation-level data.
+
+	Args:
+	    protocols (List[str]): Included conversation protocols.
+	    directionality (List[str]): Included directionality classifications.
+	    minimum_duration (float): Minimum conversation duration in seconds.
+
+	Returns:
+	    None: This function renders Session Layer analysis.
+	"""
+	throw_if( 'protocols', protocols, )
+	throw_if( 'directionality', directionality, )
+	throw_if( 'minimum_duration', minimum_duration, )
+	df_conversations = create_conversation_snapshot( create_complete_snapshot( st.session_state.packets, ), datetime.utcnow( ), )
+	if not df_conversations.empty:
+		df_conversations = df_conversations[
+			df_conversations[ 'protocol' ].isin( protocols ) &
+			df_conversations[ 'directionality' ].isin( directionality ) &
+			(df_conversations[ 'duration_seconds' ] >= minimum_duration)
+		]
+	st.markdown( '## Session Analysis' )
+	st.caption( 'OSI Layer 5 • Bidirectional Conversations • Lifecycle • Directionality • Volume' )
+	m1, m2, m3, m4, m5, m6 = st.columns( 6 )
+	m1.metric( 'Conversations', f'{len( df_conversations ):,}' )
+	m2.metric( 'Bidirectional', f"{int( df_conversations[ 'is_bidirectional' ].sum( ) ):,}" if not df_conversations.empty else '0' )
+	m3.metric( 'One-Way', f"{int( (~df_conversations[ 'is_bidirectional' ]).sum( ) ):,}" if not df_conversations.empty else '0' )
+	m4.metric( 'Avg Duration', f"{df_conversations[ 'duration_seconds' ].mean( ):,.2f}s" if not df_conversations.empty else '0.00s' )
+	m5.metric( 'Longest', f"{df_conversations[ 'duration_seconds' ].max( ):,.2f}s" if not df_conversations.empty else '0.00s' )
+	m6.metric( 'Total Bytes', f"{int( df_conversations[ 'total_bytes' ].sum( ) ):,}" if not df_conversations.empty else '0' )
+	st.markdown( cfg.BLUE_DIVIDER, unsafe_allow_html=True, )
+	if df_conversations.empty:
+		st.info( 'No conversations match the active filters.' )
+		return
+	left, right = st.columns( 2, gap='medium', border=True, )
+	with left:
+		st.plotly_chart( create_numeric_histogram( df_conversations, 'duration_seconds',
+			'Session Duration Distribution' ), use_container_width=True,
+			config=cfg.CHART_CONFIG, key='l5-duration', )
+	with right:
+		st.plotly_chart( create_category_figure( df_conversations, 'session_state',
+			'TCP Session State' ), use_container_width=True,
+			config=cfg.CHART_CONFIG, key='l5-state', )
+	st.markdown( cfg.BLUE_DIVIDER, unsafe_allow_html=True, )
+	st.plotly_chart( create_category_figure( df_conversations, 'activity_state',
+		'Session Activity State' ), use_container_width=True, config=cfg.CHART_CONFIG,
+		key='l5-activity-state', )
+	st.markdown( cfg.BLUE_DIVIDER, unsafe_allow_html=True, )
+	figure = px.scatter( df_conversations, x='bytes_a_to_b', y='bytes_b_to_a',
+		size='total_packets', color='protocol', hover_data=[ 'endpoint_a', 'endpoint_b',
+			'duration_seconds', 'session_state', ], )
+	figure.update_layout( title='Directional Bytes: A → B vs. B → A',
+		xaxis_title='Bytes A → B', yaxis_title='Bytes B → A',
+		uirevision='session-directional-bytes', )
+	st.plotly_chart( configure_figure( figure, cfg.FLOW_CHART_HEIGHT, True, ),
+		use_container_width=True, config=cfg.CHART_CONFIG, key='l5-directional-bytes', )
+	st.markdown( cfg.BLUE_DIVIDER, unsafe_allow_html=True, )
+	render_mode_editor( df_conversations, [ 'protocol', 'endpoint_a', 'endpoint_b',
+		'first_seen', 'last_seen', 'duration_seconds', 'packets_a_to_b', 'packets_b_to_a',
+		'bytes_a_to_b', 'bytes_b_to_a', 'total_packets', 'total_bytes', 'directionality',
+		'session_state', 'activity_state', 'idle_seconds', ], 'session-editor', )
+
+
+@st.fragment( run_every=ANALYSIS_REFRESH_INTERVAL )
+def render_presentation_analysis( tls_versions: List[ str ],
+	handshake_types: List[ str ], ) -> None:
+	"""
+	Render Presentation Layer analysis.
+
+	Purpose:
+	    Displays observable TLS records, versions, handshake types, SNI, ALPN, selected
+	    cipher suites, and capture limitations without decrypting payloads. Certificate
+	    parsing is intentionally outside the supported metadata scope.
+
+	Args:
+	    tls_versions (List[str]): Included TLS versions.
+	    handshake_types (List[str]): Included TLS handshake types.
+
+	Returns:
+	    None: This function renders Presentation Layer analysis.
+	"""
+	throw_if( 'tls_versions', tls_versions, )
+	throw_if( 'handshake_types', handshake_types, )
+	df_packets = create_complete_snapshot( st.session_state.packets, )
+	if not df_packets.empty:
+		df_packets = df_packets[ df_packets[ 'tls_version' ].isin( tls_versions ) ]
+		handshake_value = df_packets[ 'tls_handshake_type' ].fillna( '' )
+		df_packets = df_packets[ (handshake_value == '') | handshake_value.isin( handshake_types ) ]
+	st.markdown( '## Presentation Analysis' )
+	st.caption( 'OSI Layer 6 • Observable TLS Record and Handshake Metadata • No Decryption' )
+	m1, m2, m3, m4, m5 = st.columns( 5 )
+	m1.metric( 'TLS Records', f'{len( df_packets ):,}' )
+	m2.metric( 'Versions', f"{df_packets[ 'tls_version' ].nunique( ):,}" if not df_packets.empty else '0' )
+	m3.metric( 'Server Names', f"{df_packets[ 'tls_server_name' ].replace( '', pd.NA ).nunique( ):,}" if not df_packets.empty else '0' )
+	m4.metric( 'ALPN Values', f"{df_packets[ 'tls_alpn' ].replace( '', pd.NA ).nunique( ):,}" if not df_packets.empty else '0' )
+	m5.metric( 'Cipher Suites', f"{df_packets[ 'tls_cipher_suite' ].replace( '', pd.NA ).nunique( ):,}" if not df_packets.empty else '0' )
+	st.warning( 'TLS parsing accepts only complete records contained in one TCP payload. It does not decrypt data or reassemble TLS records split across TCP segments.' )
+	st.markdown( cfg.BLUE_DIVIDER, unsafe_allow_html=True, )
+	if df_packets.empty:
+		st.info( 'No observable TLS metadata matches the active filters.' )
+		return
+	left, right = st.columns( 2, gap='medium', border=True, )
+	with left:
+		st.plotly_chart( create_category_figure( df_packets, 'tls_version', 'TLS Version Composition' ),
+			use_container_width=True, config=cfg.CHART_CONFIG, key='l6-version', )
+	with right:
+		st.plotly_chart( create_category_figure( df_packets, 'tls_handshake_type',
+			'TLS Handshake Types' ), use_container_width=True,
+			config=cfg.CHART_CONFIG, key='l6-handshake', )
+	st.markdown( cfg.BLUE_DIVIDER, unsafe_allow_html=True, )
+	left, right = st.columns( 2, gap='medium', border=True, )
+	with left:
+		st.plotly_chart( create_category_figure( df_packets, 'tls_server_name',
+			'Top TLS Server Names' ), use_container_width=True,
+			config=cfg.CHART_CONFIG, key='l6-sni', )
+	with right:
+		st.plotly_chart( create_category_figure( df_packets, 'tls_alpn', 'ALPN Protocols' ),
+			use_container_width=True, config=cfg.CHART_CONFIG, key='l6-alpn', )
+	st.markdown( cfg.BLUE_DIVIDER, unsafe_allow_html=True, )
+	st.plotly_chart( create_category_figure( df_packets, 'tls_cipher_suite', 'TLS Cipher Suites' ),
+		use_container_width=True, config=cfg.CHART_CONFIG, key='l6-cipher', )
+	st.markdown( cfg.BLUE_DIVIDER, unsafe_allow_html=True, )
+	render_mode_editor( df_packets, [ 'timestamp', 'src_ip', 'src_port', 'dst_ip', 'dst_port',
+		'tls_record_type', 'tls_version', 'tls_handshake_type', 'tls_server_name', 'tls_alpn',
+		'tls_cipher_suite', ], 'presentation-editor', )
+
+
+@st.fragment( run_every=ANALYSIS_REFRESH_INTERVAL )
+def render_application_analysis( application_protocols: List[ str ],
+	dns_query_types: List[ str ], http_methods: List[ str ], ) -> None:
+	"""
+	Render Application Layer analysis.
+
+	Purpose:
+	    Displays DNS, unencrypted HTTP, DHCP, and NTP metadata, protocol activity, response
+	    conditions, and application-specific packet records.
+
+	Args:
+	    application_protocols (List[str]): Included application protocols.
+	    dns_query_types (List[str]): Included DNS query types.
+	    http_methods (List[str]): Included HTTP request methods.
+
+	Returns:
+	    None: This function renders Application Layer analysis.
+	"""
+	throw_if( 'application_protocols', application_protocols, )
+	throw_if( 'dns_query_types', dns_query_types, )
+	throw_if( 'http_methods', http_methods, )
+	df_packets = create_complete_snapshot( st.session_state.packets, )
+	if not df_packets.empty:
+		df_packets = df_packets[ df_packets[ 'application_protocol' ].isin( application_protocols ) ]
+		dns_mask = (df_packets[ 'application_protocol' ] != 'DNS') | (
+			df_packets[ 'dns_query_type' ].isin( dns_query_types ))
+		http_mask = (df_packets[ 'application_protocol' ] != 'HTTP') | (
+			(df_packets[ 'http_method' ] == '') | df_packets[ 'http_method' ].isin( http_methods ))
+		df_packets = df_packets[ dns_mask & http_mask ]
+	st.markdown( '## Application Analysis' )
+	st.caption( 'OSI Layer 7 • DNS • Unencrypted HTTP • DHCP • NTP' )
+	st.warning( 'HTTP metadata is parsed only when a complete start line and headers are present in one TCP payload; TCP stream reassembly is not performed; request-response correlation is limited to observable five-tuple metadata.' )
+	m1, m2, m3, m4, m5 = st.columns( 5 )
+	m1.metric( 'Application Records', f'{len( df_packets ):,}' )
+	m2.metric( 'DNS', f"{int( (df_packets[ 'application_protocol' ] == 'DNS').sum( ) ):,}" if not df_packets.empty else '0' )
+	m3.metric( 'HTTP', f"{int( (df_packets[ 'application_protocol' ] == 'HTTP').sum( ) ):,}" if not df_packets.empty else '0' )
+	m4.metric( 'DHCP', f"{int( (df_packets[ 'application_protocol' ] == 'DHCP').sum( ) ):,}" if not df_packets.empty else '0' )
+	m5.metric( 'NTP', f"{int( (df_packets[ 'application_protocol' ] == 'NTP').sum( ) ):,}" if not df_packets.empty else '0' )
+	st.markdown( cfg.BLUE_DIVIDER, unsafe_allow_html=True, )
+	if df_packets.empty:
+		st.info( 'No Application Layer metadata matches the active filters.' )
+		return
+	left, right = st.columns( 2, gap='medium', border=True, )
+	with left:
+		st.plotly_chart( create_category_figure( df_packets, 'application_protocol',
+			'Application Protocol Composition' ), use_container_width=True,
+			config=cfg.CHART_CONFIG, key='l7-protocol', )
+	with right:
+		st.plotly_chart( create_timeline_figure( df_packets, 'application_protocol',
+			'Application Activity Over Time' ), use_container_width=True,
+			config=cfg.CHART_CONFIG, key='l7-timeline', )
+	st.markdown( cfg.BLUE_DIVIDER, unsafe_allow_html=True, )
+	left, right = st.columns( 2, gap='medium', border=True, )
+	with left:
+		df_dns = df_packets[ df_packets[ 'application_protocol' ] == 'DNS' ]
+		st.plotly_chart( create_category_figure( df_dns, 'dns_query', 'Top DNS Queries' ),
+			use_container_width=True, config=cfg.CHART_CONFIG, key='l7-dns-query', )
+	with right:
+		st.plotly_chart( create_category_figure( df_dns, 'dns_response_code',
+			'DNS Response Codes' ), use_container_width=True,
+			config=cfg.CHART_CONFIG, key='l7-dns-rcode', )
+	st.markdown( cfg.BLUE_DIVIDER, unsafe_allow_html=True, )
+	st.plotly_chart( create_category_figure( df_dns, 'dns_query_type', 'DNS Query Types' ),
+		use_container_width=True, config=cfg.CHART_CONFIG, key='l7-dns-type', )
+	st.markdown( cfg.BLUE_DIVIDER, unsafe_allow_html=True, )
+	left, right = st.columns( 2, gap='medium', border=True, )
+	with left:
+		df_http = df_packets[ df_packets[ 'application_protocol' ] == 'HTTP' ]
+		st.plotly_chart( create_category_figure( df_http, 'http_method', 'HTTP Methods' ),
+			use_container_width=True, config=cfg.CHART_CONFIG, key='l7-http-method', )
+	with right:
+		st.plotly_chart( create_category_figure( df_http, 'http_status', 'HTTP Status Codes' ),
+			use_container_width=True, config=cfg.CHART_CONFIG, key='l7-http-status', )
+	st.markdown( cfg.BLUE_DIVIDER, unsafe_allow_html=True, )
+	left, right = st.columns( 2, gap='medium', border=True, )
+	with left:
+		st.plotly_chart( create_category_figure( df_packets, 'dhcp_message_type',
+			'DHCP Message Types' ), use_container_width=True,
+			config=cfg.CHART_CONFIG, key='l7-dhcp', )
+	with right:
+		st.plotly_chart( create_category_figure( df_packets, 'ntp_mode', 'NTP Modes' ),
+			use_container_width=True, config=cfg.CHART_CONFIG, key='l7-ntp', )
+	st.markdown( cfg.BLUE_DIVIDER, unsafe_allow_html=True, )
+	df_http_transactions = create_http_transaction_snapshot( df_packets, )
+	if not df_http_transactions.empty:
+		st.markdown( '<div class="sloppy-section-title">HTTP Transactions</div>',
+			unsafe_allow_html=True, )
+		render_mode_editor( df_http_transactions, [ 'request_time', 'response_time',
+			'client_ip', 'server_ip', 'http_method', 'http_host', 'http_path', 'http_status',
+			'response_seconds', 'transaction_state', ], 'http-transaction-editor', )
+	st.markdown( cfg.BLUE_DIVIDER, unsafe_allow_html=True, )
+	render_mode_editor( df_packets, [ 'timestamp', 'application_protocol', 'src_ip', 'src_port',
+		'dst_ip', 'dst_port', 'dns_query', 'dns_query_type', 'dns_response_code',
+		'dns_question_count', 'dns_answer_count', 'dns_authority_count',
+		'dns_additional_count', 'dns_is_response', 'dns_recursion_desired',
+		'dns_recursion_available', 'dns_authoritative', 'dns_truncated',
+		'http_method', 'http_host', 'http_path', 'http_status', 'dhcp_message_type',
+		'ntp_version', 'ntp_mode', ], 'application-editor', )
 
 # ==========================================================================================
 # Analysis Mode Router
 # ==========================================================================================
 
 def render_analysis_mode( selected_analysis_mode: str, protocols: List[ str ],
-	destination_ports: tuple[ int, int ], packet_window_size: int, ) -> None:
+	destination_ports: tuple[ int, int ], packet_window_size: int,
+	ether_types: List[ str ], frame_classes: List[ str ], ip_versions: List[ int ],
+	address_scopes: List[ str ], transport_protocols: List[ str ],
+	session_directionality: List[ str ], minimum_session_duration: float,
+	tls_versions: List[ str ], tls_handshake_types: List[ str ],
+	application_protocols: List[ str ], dns_query_types: List[ str ],
+	http_methods: List[ str ], ) -> None:
 	"""
 	Render the selected analysis mode.
 
 	Purpose:
-	    Routes the application to the current Network Analysis dashboard or a stable
-	    placeholder for an OSI-layer mode scheduled for implementation.
+	    Routes the application to Network Analysis or the selected OSI-layer analysis while
+	    preserving one packet-ingestion writer and mode-specific filters.
 
 	Args:
-	    selected_analysis_mode (str): Analysis mode selected in the sidebar.
-	    protocols (List[str]): Protocol values included in Network Analysis.
-	    destination_ports (tuple[int, int]): Inclusive destination-port range used by
-	        Network Analysis.
-	    packet_window_size (int): Maximum number of retained packet records.
+	    selected_analysis_mode (str): Selected analysis mode.
+	    protocols (List[str]): Network Analysis protocols.
+	    destination_ports (tuple[int, int]): Inclusive destination-port range.
+	    packet_window_size (int): Maximum retained packet count.
+	    ether_types (List[str]): Included EtherType names.
+	    frame_classes (List[str]): Included frame classifications.
+	    ip_versions (List[int]): Included IP versions.
+	    address_scopes (List[str]): Included address scopes.
+	    transport_protocols (List[str]): Included transport/session protocols.
+	    session_directionality (List[str]): Included session directionality classes.
+	    minimum_session_duration (float): Minimum session duration.
+	    tls_versions (List[str]): Included TLS versions.
+	    tls_handshake_types (List[str]): Included TLS handshake types.
+	    application_protocols (List[str]): Included application protocols.
+	    dns_query_types (List[str]): Included DNS query types.
+	    http_methods (List[str]): Included HTTP methods.
 
 	Returns:
-	    None: This function renders the selected analysis interface.
+	    None: This function renders the selected mode.
 	"""
 	throw_if( 'selected_analysis_mode', selected_analysis_mode, )
-	
 	throw_if( 'protocols', protocols, )
-	
 	throw_if( 'destination_ports', destination_ports, )
-	
 	throw_if( 'packet_window_size', packet_window_size, )
-	
+	throw_if( 'ether_types', ether_types, )
+	throw_if( 'frame_classes', frame_classes, )
+	throw_if( 'ip_versions', ip_versions, )
+	throw_if( 'address_scopes', address_scopes, )
+	throw_if( 'transport_protocols', transport_protocols, )
+	throw_if( 'session_directionality', session_directionality, )
+	throw_if( 'minimum_session_duration', minimum_session_duration, )
+	throw_if( 'tls_versions', tls_versions, )
+	throw_if( 'tls_handshake_types', tls_handshake_types, )
+	throw_if( 'application_protocols', application_protocols, )
+	throw_if( 'dns_query_types', dns_query_types, )
+	throw_if( 'http_methods', http_methods, )
 	if selected_analysis_mode == cfg.ANALYSIS_MODE_NETWORK:
 		render_realtime_summary( protocols, destination_ports, packet_window_size, )
-		
 		render_packet_analysis( protocols, destination_ports, )
-		
 		render_flow_analysis( protocols, destination_ports, )
-	
 	elif selected_analysis_mode == cfg.ANALYSIS_MODE_DATA_LINK:
-		render_analysis_placeholder( cfg.ANALYSIS_MODE_DATA_LINK, 'OSI Layer 2',
-			('Data Link Analysis will provide Ethernet, MAC-address, EtherType, '
-			 'broadcast, multicast, ARP, and VLAN analysis.'), )
-	
+		render_data_link_analysis( ether_types, frame_classes, )
 	elif selected_analysis_mode == cfg.ANALYSIS_MODE_NETWORK_LAYER:
-		render_analysis_placeholder( cfg.ANALYSIS_MODE_NETWORK_LAYER, 'OSI Layer 3',
-			('Network Layer Analysis will provide IPv4 and IPv6 header, TTL, '
-			 'hop-limit, DSCP, ECN, fragmentation, address-scope, and ICMP analysis.'), )
-	
+		render_network_layer_analysis( ip_versions, address_scopes, )
 	elif selected_analysis_mode == cfg.ANALYSIS_MODE_TRANSPORT:
-		render_analysis_placeholder( cfg.ANALYSIS_MODE_TRANSPORT, 'OSI Layer 4',
-			('Transport Analysis will provide TCP state, sequence, acknowledgment, '
-			 'window, flag, port, retransmission-indicator, and UDP analysis.'), )
-	
+		render_transport_analysis( transport_protocols, destination_ports, )
 	elif selected_analysis_mode == cfg.ANALYSIS_MODE_SESSION:
-		render_analysis_placeholder( cfg.ANALYSIS_MODE_SESSION, 'OSI Layer 5',
-			('Session Analysis will reconstruct bidirectional conversations and '
-			 'analyze duration, directionality, packet volume, byte volume, and '
-			 'connection lifecycle.'), )
-	
+		render_session_analysis( transport_protocols, session_directionality,
+			minimum_session_duration, )
 	elif selected_analysis_mode == cfg.ANALYSIS_MODE_PRESENTATION:
-		render_analysis_placeholder( cfg.ANALYSIS_MODE_PRESENTATION, 'OSI Layer 6',
-			('Presentation Analysis will provide observable TLS version, handshake, '
-			 'server-name, ALPN, cipher-suite, and certificate metadata analysis.'), )
-	
+		render_presentation_analysis( tls_versions, tls_handshake_types, )
 	elif selected_analysis_mode == cfg.ANALYSIS_MODE_APPLICATION:
-		render_analysis_placeholder( cfg.ANALYSIS_MODE_APPLICATION, 'OSI Layer 7',
-			('Application Analysis will provide DNS, DHCP, NTP, and observable '
-			 'unencrypted HTTP metadata analysis.'), )
-	
+		render_application_analysis( application_protocols, dns_query_types, http_methods, )
 	else:
 		raise ValueError( f'Unsupported analysis mode: {selected_analysis_mode}' )
+
 
 # ==========================================================================================
 # Application Rendering
@@ -1912,7 +3424,11 @@ def render_analysis_mode( selected_analysis_mode: str, protocols: List[ str ],
 
 maintain_packet_capture( window_size )
 
-render_analysis_mode( analysis_mode, proto_filter, port_range, window_size, )
+render_analysis_mode( analysis_mode, proto_filter, port_range, window_size,
+	ether_type_filter, frame_class_filter, ip_version_filter, address_scope_filter,
+	transport_protocol_filter, session_direction_filter, minimum_session_duration,
+	tls_version_filter, tls_handshake_filter, application_protocol_filter,
+	dns_query_type_filter, http_method_filter, )
 
 # ==========================================================================================
 # Footer

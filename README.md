@@ -1,6 +1,6 @@
 ###### Sloppy
 
-![]()
+![](https://github.com/is-leeroy-jenkins/Sloppy/blob/main/resources/images/sloppy_project.png)
 
 
 
