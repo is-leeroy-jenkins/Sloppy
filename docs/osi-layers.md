@@ -6,12 +6,12 @@
 
 **Mode:** Application Analysis
 
-| Protocol | Extracted or analyzed metadata |
-|---|---|
-| DNS | Query type, query name, response code, query/response classification |
-| HTTP | Method, host, path, response status, content metadata when available |
-| DHCP | Message type and application activity |
-| NTP | Version, mode, stratum, leap indicator, and packet activity |
+| Protocol | Extracted or analyzed metadata                                       |
+|----------|----------------------------------------------------------------------|
+| DNS      | Query type, query name, response code, query/response classification |
+| HTTP     | Method, host, path, response status, content metadata when available |
+| DHCP     | Message type and application activity                                |
+| NTP      | Version, mode, stratum, leap indicator, and packet activity          |
 
 ## :material-numeric-6-box: Layer 6 — Presentation
 
